@@ -1,0 +1,140 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Career Quest — объяснимый AI-навигатор развития сотрудника" />
+    <title>Career Quest — AI-навигатор развития</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar" id="sidebar">
+        <div class="brand">
+          <span class="brand-mark">CQ</span>
+          <span><strong>Career Quest</strong><small>AI growth navigator</small></span>
+        </div>
+        <div class="workspace-label">РАБОЧЕЕ ПРОСТРАНСТВО</div>
+        <nav class="nav-list" aria-label="Разделы приложения">
+          <button class="nav-item active" id="employeeNav"><span class="nav-icon">◉</span><span>Мой путь</span></button>
+          <button class="nav-item" id="hrNav"><span class="nav-icon">▦</span><span>HR-аналитика</span></button>
+        </nav>
+        <div class="sidebar-spacer"></div>
+        <button class="upload-card" id="openUploadButton">
+          <span class="upload-icon">↥</span>
+          <span><strong>Загрузить датасет</strong><small>JSON / CSV · схема стартового кита</small></span>
+        </button>
+        <div class="privacy-note">
+          <span>⌾</span>
+          <p><strong>Приватный контур</strong>Данные профиля видны только сотруднику и HR с соответствующей ролью.</p>
+        </div>
+        <div class="source-status"><i></i><span id="dataSource">Встроенный демо-набор</span></div>
+      </aside>
+
+      <main class="main-content">
+        <header class="topbar">
+          <button class="mobile-menu" id="mobileMenu" aria-label="Открыть меню">☰</button>
+          <div><p class="eyebrow">HALYK BANK · HACKALEM AI</p><h1 id="pageTitle">Карьерная траектория</h1></div>
+          <div class="topbar-actions">
+            <label class="employee-picker" id="employeePickerWrap"><span>Профиль</span><select id="employeePicker" aria-label="Выбрать сотрудника"></select></label>
+            <button class="ghost-button" id="resetButton" title="Вернуть демо-данные">↻ Сбросить</button>
+          </div>
+        </header>
+
+        <div class="loading-state" id="loadingState"><span class="loader"></span><p>AI анализирует профиль, историю и требования грейда…</p></div>
+
+        <section id="employeeView" hidden>
+          <section class="profile-hero">
+            <div class="profile-copy">
+              <div class="identity-row">
+                <div class="avatar" id="employeeAvatar">АС</div>
+                <div>
+                  <span class="status-pill"><i></i> Профиль актуален</span>
+                  <h2 id="employeeName">Аян Серик</h2>
+                  <p><span id="employeeRole">Backend-разработчик</span> · <span id="employeeTenure">52 месяца в компании</span></p>
+                </div>
+              </div>
+              <div class="trajectory" aria-label="Карьерная траектория">
+                <div class="trajectory-stage done"><span>✓</span><div><small>ТЕКУЩИЙ ГРЕЙД</small><strong id="currentGrade">Middle</strong></div></div>
+                <div class="trajectory-line"><i id="trajectoryLine"></i></div>
+                <div class="trajectory-stage target"><span>↗</span><div><small>СЛЕДУЮЩАЯ ЦЕЛЬ</small><strong id="targetGrade">Senior</strong></div></div>
+              </div>
+            </div>
+            <div class="readiness-card">
+              <div class="readiness-ring" id="readinessRing"><span><b id="readinessValue">0%</b><small>готовность</small></span></div>
+              <div><small>ДО СЛЕДУЮЩЕГО ГРЕЙДА</small><strong id="readinessLabel">Нужно закрыть 2 разрыва</strong><p>Расчёт обновляется после каждой активности.</p></div>
+            </div>
+          </section>
+
+          <section class="decision-insight" id="decisionInsight" hidden>
+            <span class="ai-mark">✦</span>
+            <div><small>ПОЧЕМУ AI НЕ ВЫБРАЛ ПРОСТО САМЫЙ СЛАБЫЙ НАВЫК</small><p id="decisionInsightText"></p></div>
+          </section>
+
+          <section class="section-block recommendations-section">
+            <div class="section-heading">
+              <div><p class="eyebrow">ОБЪЯСНИМЫЙ AI</p><h2>Следующие лучшие шаги</h2></div>
+              <span class="method-pill">4 фактора · один прозрачный score</span>
+            </div>
+            <div class="recommendation-grid" id="recommendationGrid"></div>
+          </section>
+
+          <div class="two-column">
+            <section class="panel skills-panel">
+              <div class="section-heading compact">
+                <div><p class="eyebrow">SKILL GAP</p><h2>Навыки для <span id="skillsTargetGrade">Senior</span></h2></div>
+                <div class="legend"><span><i class="current-dot"></i>Сейчас</span><span><i class="target-dot"></i>Нужно</span></div>
+              </div>
+              <div class="skills-list" id="skillsList"></div>
+            </section>
+            <section class="panel history-panel">
+              <div class="section-heading compact">
+                <div><p class="eyebrow">КОНТЕКСТ РЕШЕНИЯ</p><h2>История участия</h2></div>
+                <span class="history-count" id="historyCount">0 событий</span>
+              </div>
+              <div class="history-list" id="historyList"></div>
+            </section>
+          </div>
+        </section>
+
+        <section id="hrView" hidden>
+          <section class="hr-hero">
+            <div><span class="status-pill"><i></i> Данные обновлены</span><h2>Пульс развития команды</h2><p>Агрегированный срез без публичных рейтингов сотрудников.</p></div>
+            <div class="hr-lock">⌾ Только роль HR</div>
+          </section>
+          <div class="kpi-grid" id="kpiGrid"></div>
+          <div class="hr-grid">
+            <section class="panel gap-panel"><div class="section-heading compact"><div><p class="eyebrow">КОМПЕТЕНЦИИ</p><h2>Где чаще всего есть разрыв</h2></div></div><div class="gap-chart" id="gapChart"></div></section>
+            <section class="panel participation-panel"><div class="section-heading compact"><div><p class="eyebrow">АКТИВНОСТИ</p><h2>Участие сотрудников</h2></div></div><div class="participation-chart" id="participationChart"></div></section>
+          </div>
+          <section class="panel watchlist-panel">
+            <div class="section-heading compact"><div><p class="eyebrow">ТРЕБУЕТ ВНИМАНИЯ</p><h2>Кому нужен подходящий следующий шаг</h2></div><span class="privacy-chip">Не рейтинг · приватный список</span></div>
+            <div class="watch-table" id="watchTable"></div>
+          </section>
+        </section>
+
+        <footer><span>Career Quest · Explainable recommendations</span><span>Решение помогает выбирать, а не оценивает человека.</span></footer>
+      </main>
+    </div>
+
+    <div class="modal-backdrop" id="modalBackdrop"></div>
+    <section class="modal upload-modal" id="uploadModal" aria-hidden="true">
+      <button class="modal-close" data-close-modal aria-label="Закрыть">×</button>
+      <p class="eyebrow">ПРОВЕРОЧНЫЕ ПРОФИЛИ</p><h2>Загрузить данные жюри</h2>
+      <p class="modal-intro">Выберите один или несколько файлов из стартового кита. Система распознает <b>employees.json</b>, <b>events.json</b>, <b>skills.json</b> и <b>activity_history.csv</b>.</p>
+      <label class="drop-zone" id="dropZone"><input type="file" id="fileInput" multiple accept=".json,.csv" /><span>↥</span><strong>Перетащите файлы сюда</strong><small>или нажмите, чтобы выбрать · до 8 МБ</small></label>
+      <div class="selected-files" id="selectedFiles"></div>
+      <div class="modal-actions"><button class="ghost-button" data-close-modal>Отмена</button><button class="primary-button" id="uploadButton" disabled>Проверить и загрузить</button></div>
+    </section>
+
+    <section class="modal explanation-modal" id="explanationModal" aria-hidden="true">
+      <button class="modal-close" data-close-modal aria-label="Закрыть">×</button>
+      <p class="eyebrow">ПРОЗРАЧНОЕ РЕШЕНИЕ</p><h2 id="explanationTitle">Почему этот шаг</h2>
+      <div class="score-hero"><strong id="explanationScore">0</strong><span>/ 100<br />AI relevance score</span></div>
+      <div class="factor-list" id="factorList"></div><div class="score-breakdown" id="scoreBreakdown"></div>
+    </section>
+
+    <div class="toast" id="toast" role="status"></div>
+    <script src="app.js"></script>
+  </body>
+</html>
