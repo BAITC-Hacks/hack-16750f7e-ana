@@ -1,0 +1,4 @@
+employee_id,event_id,status,on_time,date
+JURY01,EV_PUBLIC_SPEAKING,skipped,false,2026-04-10
+JURY01,EV_PUBLIC_SPEAKING,declined,false,2026-06-14
+JURY01,EV_PYTHON_ADV,completed,true,2026-08-22

@@ -15,6 +15,7 @@ from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, timedelta
 from threading import RLock
+from functools import wraps
 from typing import Any
 
 
@@ -203,12 +204,54 @@ class ScoreParts:
         )
 
 
-class CareerEngine:
-    def __init__(self) -> None:
-        self.lock = RLock()
-        self.reset()
+def synchronized(method):
+    @wraps(method)
+    def wrapped(self, *args, **kwargs):
+        with self.lock:
+            store = getattr(self, "store", None)
+            durable = store and not kwargs.get("preview") and method.__name__ in {"reset", "complete", "set_participation", "upload_bundle"}
+            if durable:
+                from storage import FIELDS
+                before = {key: deepcopy(getattr(self, key)) for key in FIELDS}
+            try:
+                result = method(self, *args, **kwargs)
+                if durable:
+                    store.save(self)
+                return result
+            except Exception:
+                if durable:
+                    for key, value in before.items():
+                        setattr(self, key, value)
+                raise
+    return wrapped
 
+
+class CareerEngine:
+    def __init__(self, storage_path=None) -> None:
+        self.lock = RLock()
+        self.store = None
+        self.reset()
+        if storage_path:
+            from storage import SnapshotStore
+            store = SnapshotStore(storage_path)
+            data = store.load()
+            if data is not None:
+                from data_adapter import normalize_bundle, validate_references
+                try:
+                    normalized, _ = normalize_bundle({key: data[key] for key in ("employees", "skills", "events", "history")})
+                    validate_references(normalized, normalized["employees"], normalized["skills"], normalized["events"])
+                    for key, value in data.items():
+                        setattr(self, key, set(value) if key == "paused_employees" else value)
+                    self.hr_view()
+                except Exception as exc:
+                    raise RuntimeError("Повреждённое сохранение: восстановите резервную копию; файл не изменён.") from exc
+            self.store = store
+            if data is None:
+                store.save(self)
+
+    @synchronized
     def reset(self) -> None:
+        self.revision = getattr(self, "revision", 0) + 1
         self.paused_employees = set()
         self.skills = build_skills()
         self.events = build_events()
@@ -246,9 +289,9 @@ class CareerEngine:
         return requirements
 
     @staticmethod
-    def readiness(levels: dict[str, int], requirements: dict[str, int]) -> float:
+    def readiness(levels: dict[str, int], requirements: dict[str, int]) -> float | None:
         if not requirements:
-            return 100.0
+            return None
         covered = sum(min(float(levels.get(skill_id, 0)) / max(required, 1), 1.0) for skill_id, required in requirements.items())
         return round(covered / len(requirements) * 100, 1)
 
@@ -271,10 +314,13 @@ class CareerEngine:
             "fit": max(0.05, min(fit, 1.0)),
         }
 
+    @synchronized
     def recommendations(self, employee_id: str, limit: int = 3) -> list[dict[str, Any]]:
         employee = self.employee(employee_id)
         target = next_grade(str(employee.get("grade", "Middle")))
         requirements = self.requirements(employee, target)
+        if not requirements:
+            return []
         current_levels = {key: int(value) for key, value in employee.get("skills", {}).items()}
         current_readiness = self.readiness(current_levels, requirements)
         gaps = {skill_id: max(required - current_levels.get(skill_id, 0), 0) for skill_id, required in requirements.items()}
@@ -338,7 +384,7 @@ class CareerEngine:
             history = self._history_stats(employee_id, event)
             grade_relevance = min(sum(relevance_values) / max(len(requirements), 1) * 3.2, 1.0)
             impact = min(delta / 14.0, 1.0)
-            duration = float(event.get("duration_hours", 4) or 4)
+            duration = float(event.get("duration_hours", 4))
             feasibility = max(0.35, min(1.0, 1.12 - duration / 20))
             parts = ScoreParts(grade_relevance, impact, history["fit"], feasibility)
             primary = affected[0]
@@ -391,6 +437,7 @@ class CareerEngine:
         ranked.sort(key=lambda item: item["score"], reverse=True)
         return ranked[:limit]
 
+    @synchronized
     def employee_view(self, employee_id: str) -> dict[str, Any]:
         employee = deepcopy(self.employee(employee_id))
         target = next_grade(str(employee.get("grade", "Middle")))
@@ -430,6 +477,12 @@ class CareerEngine:
             "role_label": ROLE_LABELS.get(str(employee.get("role")), str(employee.get("role"))),
             "target_grade": target,
             "readiness": self.readiness(levels, requirements),
+            "requirements_missing": not bool(requirements),
+            "revision": self.revision,
+            "decision_source": "deterministic_fallback",
+            "ai_used": False,
+            "ai_latency_ms": 0,
+            "fallback_reason": "not_requested",
             "skills": skill_rows,
             "recommendations": recommendations,
             "history": history_rows,
@@ -454,7 +507,7 @@ class CareerEngine:
     def planner(self, employee_id: str, hours: Any = 8) -> dict[str, Any]:
         hours = self.time_budget(hours)
         ranked = self.recommendations(employee_id, limit=len(self.events))
-        options = [item for item in ranked if 0 < item["duration_hours"] <= hours]
+        options = [item for item in ranked if 0 <= item["duration_hours"] <= hours]
         top = ranked[0] if ranked else None
         if not ranked:
             message = "В каталоге нет подходящих незавершённых активностей. Проверьте пробелы с наставником: отсутствие шага не означает готовность к повышению."
@@ -506,11 +559,16 @@ class CareerEngine:
                     "hours": total_hours, "steps": steps,
                     "closed_gaps": sum(original.get(skill, 0) < required <= levels.get(skill, 0)
                                        for skill, required in requirements.items()),
+                    "remaining_gaps": [{"skill_id": skill, "current": levels.get(skill, 0), "required": required,
+                                        "gap": required - levels.get(skill, 0)}
+                                       for skill, required in requirements.items() if levels.get(skill, 0) < required],
+                    "improved_skills_count": sum(value > original.get(skill, 0) for skill, value in levels.items()),
                     "skills": [{"name": local_text((self.skill(skill) or {}).get("name")) or skill,
                                 "before": original.get(skill, 0), "after": value}
                                for skill, value in levels.items() if value != original.get(skill, 0)],
                     "note": "Это сценарий по правилам каталога, а не оценка реального обучения. Навыки, история и XP не изменены. Порядок шагов — порядок выбора; эффект пересчитан после каждого шага."}
 
+    @synchronized
     def set_participation(self, employee_id: str, paused: bool) -> dict[str, Any]:
         if not isinstance(paused, bool):
             raise ValueError("paused должен быть boolean")
@@ -520,6 +578,7 @@ class CareerEngine:
                 self.paused_employees.add(employee_id)
             else:
                 self.paused_employees.discard(employee_id)
+            self.revision += 1
             return {"paused": paused}
 
     def gamification(self, employee_id: str) -> dict[str, Any]:
@@ -553,6 +612,7 @@ class CareerEngine:
                 "level_goal": 300, "completed": count, "weekly_completed": weekly,
                 "weekly_goal": 2, "badges": badges}
 
+    @synchronized
     def complete(self, employee_id: str, event_id: str) -> dict[str, Any]:
         with self.lock:
             return self._complete(employee_id, event_id)
@@ -574,28 +634,90 @@ class CareerEngine:
         self.history.append(
             {"employee_id": employee_id, "event_id": event_id, "status": "completed", "on_time": True, "date": str(date.today())}
         )
+        self.revision += 1
         return {**self.employee_view(employee_id), "reward": {"xp": 100, "already_completed": False}}
 
+    def no_step_reason(self, employee):
+        requirements = self.requirements(employee, next_grade(employee.get("grade", "Middle")))
+        if not requirements:
+            return "Отсутствуют требования следующего грейда"
+        levels = employee.get("skills", {})
+        gaps = {key for key, required in requirements.items() if levels.get(key, 0) < required}
+        if not gaps:
+            return "Нет открытых skill gaps"
+        suitable = [event for event in self.events if not event.get("audience", {}).get("roles")
+                    or employee.get("role") in event["audience"]["roles"]]
+        if not suitable:
+            return "Каталог не содержит активности для роли"
+        helpful = [event for event in suitable if any(
+            (item.get("skill_id") or item.get("skill")) in gaps and item.get("gain", 1) > 0
+            and levels.get(item.get("skill_id") or item.get("skill"), 0) < item.get("max_level", 5)
+            for item in event.get("skills") or event.get("skill_gains") or [])]
+        if not helpful:
+            return "Нет активности с доступным приростом для требуемых навыков"
+        completed = {row.get("event_id") for row in self.history if row.get("employee_id") == employee["employee_id"]
+                     and row.get("status") == "completed"}
+        if all(event["event_id"] in completed for event in helpful):
+            return "Все подходящие активности уже завершены"
+        return "Нет допустимого следующего шага по текущим ограничениям"
+
+    def activity_participation(self):
+        known = {employee["employee_id"] for employee in self.employees}
+        grouped = defaultdict(dict)
+        for index, row in enumerate(self.history):
+            person = row.get("employee_id")
+            if person not in known:
+                continue
+            event_id = row.get("event_id")
+            status = "skipped" if row.get("status") == "missed" else row.get("status")
+            if status not in {"completed", "skipped", "declined"}:
+                continue
+            key = (status == "completed", str(row.get("date", "")), index)
+            previous = grouped[event_id].get(person)
+            if previous is None or key > previous[0]:
+                grouped[event_id][person] = (key, status)
+        result = []
+        for event in self.events:
+            states = Counter(value[1] for value in grouped[event["event_id"]].values())
+            participants = sum(states.values())
+            roles = event.get("audience", {}).get("roles", [])
+            result.append({"event_id": event["event_id"], "title": local_text(event.get("title")),
+                           "eligible_employees": sum(not roles or person.get("role") in roles for person in self.employees),
+                           "participants": participants, "completed": states["completed"], "skipped": states["skipped"],
+                           "declined": states["declined"],
+                           "completion_rate": round(states["completed"] / participants * 100, 1) if participants else 0})
+        return result
+
+    @synchronized
     def hr_view(self) -> dict[str, Any]:
         gaps: Counter[str] = Counter()
         participants = Counter(row.get("status", "unknown") for row in self.history)
         watchlist = []
         without_step = 0
+        employees_without_step = []
+        requirements_missing = 0
         readiness_values = []
         for employee in self.employees:
             target = next_grade(str(employee.get("grade", "Middle")))
             requirements = self.requirements(employee, target)
             levels = employee.get("skills", {})
             readiness = self.readiness(levels, requirements)
-            readiness_values.append(readiness)
+            if readiness is None:
+                requirements_missing += 1
+            else:
+                readiness_values.append(readiness)
             for skill_id, required in requirements.items():
                 gaps[skill_id] += max(int(required) - int(levels.get(skill_id, 0)), 0)
             recommendations = self.recommendations(employee["employee_id"])
             if not recommendations:
                 without_step += 1
+                employees_without_step.append({"employee_id": employee["employee_id"],
+                    "name": employee.get("name", employee["employee_id"]),
+                    "role": ROLE_LABELS.get(employee.get("role"), employee.get("role")),
+                    "grade": employee.get("grade"), "readiness": readiness, "reason": self.no_step_reason(employee)})
             rows = [row for row in self.history if row.get("employee_id") == employee["employee_id"]]
             participation = sum(row.get("status") == "completed" for row in rows) / max(len(rows), 1) * 100
-            if readiness < 58 and participation < 55 and employee["employee_id"] not in self.paused_employees:
+            if readiness is not None and readiness < 58 and participation < 55 and employee["employee_id"] not in self.paused_employees:
                 watchlist.append(
                     {
                         "employee_id": employee["employee_id"],
@@ -613,7 +735,10 @@ class CareerEngine:
         return {
             "employees": len(self.employees),
             "paused_employees": len(self.paused_employees),
-            "average_readiness": round(sum(readiness_values) / max(len(readiness_values), 1), 1),
+            "average_readiness": round(sum(readiness_values) / len(readiness_values), 1) if readiness_values else None,
+            "requirements_missing": requirements_missing,
+            "employees_without_step": employees_without_step,
+            "activity_participation": self.activity_participation(),
             "without_step": without_step,
             "completion_rate": round(participants["completed"] / total_history * 100, 1),
             "skill_gaps": gap_rows,
@@ -622,46 +747,79 @@ class CareerEngine:
             "data_source": self.data_source,
         }
 
-    def upload_bundle(self, bundle: dict[str, Any]) -> dict[str, Any]:
-        employees = bundle.get("employees") or bundle.get("profiles")
-        events = bundle.get("events")
-        skills = bundle.get("skills")
-        history = bundle.get("history") or bundle.get("activity_history")
-        if isinstance(employees, dict):
-            employees = [employees]
-        if employees:
-            normalized = []
-            for index, item in enumerate(employees):
-                record = dict(item)
-                record.setdefault("employee_id", f"UP{index + 1:04d}")
-                record.setdefault("name", record["employee_id"])
-                record.setdefault("grade", "Middle")
-                record.setdefault("skills", {})
-                normalized.append(record)
-            known = {item["employee_id"] for item in normalized}
-            self.employees = [item for item in self.employees if item["employee_id"] not in known] + normalized
-        if events:
-            self.events = list(events)
-        if skills:
-            self.skills = list(skills.values()) if isinstance(skills, dict) else list(skills)
-        if history:
-            uploaded_ids = {item.get("employee_id") for item in history}
-            self.history = [row for row in self.history if row.get("employee_id") not in uploaded_ids] + list(history)
-        self.data_source = "Загруженный набор жюри"
-        return {
-            "employees": len(self.employees),
-            "events": len(self.events),
-            "skills": len(self.skills),
-            "history": len(self.history),
-            "data_source": self.data_source,
-        }
+    @synchronized
+    def upload_bundle(self, bundle: dict[str, Any], *, mode="legacy", preview=False) -> dict[str, Any]:
+        from data_adapter import normalize_bundle, validate_references
+        normalized, warnings = normalize_bundle(bundle)
+        if mode not in {"legacy", "merge", "replace"}:
+            raise ValueError("Импорт: mode: допустимы merge или replace")
+        if mode == "replace" and set(normalized) != {"employees", "events", "skills", "history"}:
+            raise ValueError("Импорт: для замены нужны employees, events, skills и history")
+        temporary = object.__new__(CareerEngine)
+        temporary.lock = RLock()
+        for key in ("employees", "events", "skills", "history", "paused_employees", "revision", "data_source"):
+            setattr(temporary, key, deepcopy(getattr(self, key)))
+        if mode == "replace":
+            temporary.employees, temporary.events, temporary.skills, temporary.history = [], [], [], []
+            temporary.paused_employees = set()
+        employees = normalized.get("employees", [])
+        known = {row["employee_id"] for row in employees}
+        temporary.employees = [row for row in temporary.employees if row["employee_id"] not in known] + employees
+        for key in ("events", "skills"):
+            if key in normalized:
+                if mode == "merge":
+                    id_key = "event_id" if key == "events" else "skill_id"
+                    updated = {row[id_key]: row for row in getattr(temporary, key)}
+                    updated.update({row[id_key]: row for row in normalized[key]})
+                    setattr(temporary, key, list(updated.values()))
+                else:
+                    setattr(temporary, key, normalized[key])
+        if "history" in normalized:
+            rows = normalized["history"]
+            replaced = {row["employee_id"] for row in rows} or known
+            if mode == "merge":
+                temporary.history += [row for row in rows if row not in temporary.history]
+            else:
+                temporary.history = [row for row in temporary.history if row.get("employee_id") not in replaced] + rows
+                warnings.append("История переданных сотрудников заменяется; остальные записи сохранены.")
+            if not rows and not replaced:
+                warnings.append("Пустая история без employees: существующая история сохранена.")
+        validate_references(normalized, temporary.employees, temporary.skills, temporary.events)
+        try:
+            missing = sum(temporary.employee_view(row["employee_id"])["requirements_missing"] for row in temporary.employees)
+            temporary.hr_view()
+        except (TypeError, ValueError, KeyError, AttributeError, OverflowError) as exc:
+            raise ValueError("Импорт: набор несовместим с расчётом профиля и рекомендаций") from exc
+        if missing:
+            warnings.append(f"У {missing} сотрудников нет требований следующего грейда; готовность недоступна.")
+        event_ids = {row["event_id"] for row in temporary.events}
+        if any(row.get("event_id") not in event_ids for row in temporary.history):
+            warnings.append("В сохранённой истории есть активности вне нового каталога; они не входят в таблицу участия по активностям.")
+        temporary.data_source = "Загруженный набор жюри"
+        if mode == "merge" and self.data_source == "Встроенный демо-набор":
+            temporary.data_source = "Демо-набор + импортированные данные"
+            warnings.append("Импорт дополняет синтетический демо-набор. Для отдельного набора выберите замену.")
+        if preview:
+            return {"counts": {key: len(normalized.get(key, [])) for key in ("employees", "events", "skills", "history")},
+                    "warnings": warnings, "mode": mode, "revision": self.revision}
+        for key in ("employees", "events", "skills", "history", "data_source", "paused_employees"):
+            setattr(self, key, getattr(temporary, key))
+        self.revision += 1
+        counts = {key: len(getattr(self, key)) for key in ("employees", "events", "skills", "history")}
+        return {**counts, "counts": counts, "warnings": warnings, "data_source": self.data_source}
 
 
 def parse_csv_text(text: str) -> list[dict[str, Any]]:
-    rows = []
-    for row in csv.DictReader(io.StringIO(text)):
-        normalized = dict(row)
-        if "on_time" in normalized:
-            normalized["on_time"] = str(normalized["on_time"]).lower() in {"1", "true", "yes", "да"}
-        rows.append(normalized)
-    return rows
+    text = text.lstrip("\ufeff")
+    delimiter = ";" if ";" in text.splitlines()[0] else ","
+    try:
+        reader = csv.DictReader(io.StringIO(text), delimiter=delimiter, strict=True)
+        headers = reader.fieldnames or []
+        if len(set(headers)) != len(headers) or not {"employee_id", "event_id", "status"} <= set(headers):
+            raise ValueError("CSV: нужны уникальные заголовки employee_id,event_id,status")
+        rows = list(reader)
+        if any(None in row or any(value is None for value in row.values()) for row in rows):
+            raise ValueError("CSV: число полей не совпадает с заголовком")
+        return rows
+    except csv.Error as exc:
+        raise ValueError("CSV: повреждённая строка или кавычки") from exc

@@ -2,6 +2,5 @@ __pycache__/
 *.py[cod]
 .DS_Store
 .env
-*.sqlite*
-*.db
-browser-artifacts/
+.coverage
+htmlcov/

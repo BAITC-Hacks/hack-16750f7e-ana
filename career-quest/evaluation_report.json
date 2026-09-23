@@ -1,0 +1,38 @@
+{
+  "evaluation_scope": {
+    "dataset": "bundled synthetic dataset (fixed random seeds)",
+    "eligible_employees": 200,
+    "employees": 200,
+    "events": 12,
+    "limitations": "Offline engineering checks only; business impact, fairness and promotion outcomes must be validated on governed real-world data before production use.",
+    "recommendations_evaluated": 484
+  },
+  "interpretation": {
+    "baseline": "The baseline picks the highest-ranked available activity touching the employee's lowest absolute target-grade skill.",
+    "coverage": "Share of eligible employees receiving at least one next step.",
+    "explanation_completeness": "Every recommendation exposes all four factors and score components.",
+    "positive_counterfactual": "Projected readiness is higher than current readiness.",
+    "repeatability": "Two fresh engines return the same ordered event IDs and scores.",
+    "role_eligibility": "Every recommendation satisfies the event audience rule."
+  },
+  "jury_challenge_E0028": {
+    "career_quest_top_event": "Практикум по System Design",
+    "career_quest_top_score": 49.7,
+    "lowest_current_skill": "Публичные выступления",
+    "lowest_skill_baseline_event": "Уверенное публичное выступление",
+    "readiness_after": 77.1,
+    "readiness_before": 70.8
+  },
+  "metrics": {
+    "deterministic_repeatability_pct": 100.0,
+    "explanation_completeness_pct": 100.0,
+    "lowest_skill_baseline_comparisons": 154,
+    "mean_baseline_readiness_delta_points": 11.46,
+    "mean_ranking_score_advantage_points": 4.73,
+    "mean_top_readiness_delta_points": 12.49,
+    "positive_counterfactual_pct": 100.0,
+    "recommendation_coverage_pct": 98.5,
+    "role_eligibility_pct": 100.0,
+    "top_differs_from_lowest_skill_baseline_pct": 32.5
+  }
+}
