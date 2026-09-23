@@ -6,35 +6,110 @@ import argparse
 import json
 import mimetypes
 import os
+import secrets
+import socket
+from http.cookies import SimpleCookie
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import parse_qs, unquote, urlparse
 
 from engine import CareerEngine
+from coaching import coaching
+from auth import AuthError, AuthStore
 
 
 ROOT = Path(__file__).resolve().parent
 ENGINE = CareerEngine()
+AUTH = None
+
+
+class CareerQuestServer(ThreadingHTTPServer):
+    # Windows otherwise allows two servers to bind the same port, sending
+    # login requests to a different process than the one that printed passwords.
+    allow_reuse_address = False
+
+    def server_bind(self):
+        if os.name == "nt":
+            self.socket.setsockopt(socket.SOL_SOCKET, socket.SO_EXCLUSIVEADDRUSE, 1)
+        super().server_bind()
+
+
+def configure_auth():
+    global AUTH
+    accounts = []
+    for username, role, employee_id, variable in [
+        ("employee", "employee", os.getenv("CQ_EMPLOYEE_ID", "E0028"), "CQ_EMPLOYEE_PASSWORD"),
+        ("hr", "hr", None, "CQ_HR_PASSWORD"),
+    ]:
+        password = os.getenv(variable) or secrets.token_urlsafe(12)
+        accounts.append((username, password, role, employee_id))
+        if not os.getenv(variable):
+            print(f"Local login: {username} / {password}")
+    ENGINE.employee(accounts[0][3])
+    AUTH = AuthStore(accounts)
 
 
 class CareerQuestHandler(BaseHTTPRequestHandler):
     server_version = "CareerQuest/1.0"
 
-    def _json(self, payload: object, status: int = 200) -> None:
+    def end_headers(self):
+        self.send_header("X-Frame-Options", "DENY")
+        self.send_header("Referrer-Policy", "same-origin")
+        super().end_headers()
+
+    def _json(self, payload: object, status: int = 200, cookie: str | None = None) -> None:
         body = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
+        self.send_header("X-Content-Type-Options", "nosniff")
+        if cookie:
+            self.send_header("Set-Cookie", cookie)
         self.end_headers()
         self.wfile.write(body)
 
     def _body(self) -> dict:
+        if self.headers.get_content_type() != "application/json":
+            raise ValueError("Ожидается application/json")
         length = int(self.headers.get("Content-Length", "0"))
-        if length > 8_000_000:
+        if length < 0 or length > 8_000_000:
             raise ValueError("Файл слишком большой для демо-режима")
         raw = self.rfile.read(length)
-        return json.loads(raw.decode("utf-8")) if raw else {}
+        payload = json.loads(raw.decode("utf-8")) if raw else {}
+        if not isinstance(payload, dict):
+            raise ValueError("Ожидается JSON-объект")
+        return payload
+
+    def _token(self):
+        cookie = SimpleCookie()
+        try:
+            cookie.load(self.headers.get("Cookie", ""))
+            return cookie["cq_session"].value if "cq_session" in cookie else ""
+        except Exception:
+            return ""
+
+    def _session(self):
+        if AUTH is None:
+            raise AuthError("Перезапустите сервер для включения входа", 503)
+        return AUTH.session(self._token())
+
+    @staticmethod
+    def _cookie(token, age=28800):
+        secure = "; Secure" if os.getenv("CQ_SECURE_COOKIE") == "1" else ""
+        return f"cq_session={token}; Path=/; HttpOnly; SameSite=Strict; Max-Age={age}{secure}"
+
+    @staticmethod
+    def _role(session, role):
+        if session["user"]["role"] != role:
+            raise AuthError("Недостаточно прав", 403)
+
+    def _employee_id(self, session, requested=None):
+        user = session["user"]
+        employee_id = requested or user["employee_id"]
+        if user["role"] == "employee" and employee_id != user["employee_id"]:
+            raise AuthError("Доступен только ваш профиль", 403)
+        return employee_id
 
     def do_GET(self) -> None:  # noqa: N802
         parsed = urlparse(self.path)
@@ -42,7 +117,12 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
         try:
             if path == "/api/health":
                 return self._json({"status": "ok"})
+            if path.startswith("/api/"):
+                session = self._session()
+            if path == "/api/session":
+                return self._json({"user": session["user"], "csrf": session["csrf"]})
             if path == "/api/employees":
+                self._role(session, "hr")
                 employees = [
                     {
                         "employee_id": item["employee_id"],
@@ -55,11 +135,18 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
                 ]
                 return self._json({"employees": employees, "data_source": ENGINE.data_source})
             if path == "/api/employee":
-                employee_id = parse_qs(parsed.query).get("id", ["E0028"])[0]
-                return self._json(ENGINE.employee_view(employee_id))
+                employee_id = self._employee_id(session, parse_qs(parsed.query).get("id", [None])[0])
+                profile = ENGINE.employee_view(employee_id)
+                profile["coaching"] = coaching(profile)
+                return self._json(profile)
             if path == "/api/hr":
+                self._role(session, "hr")
                 return self._json(ENGINE.hr_view())
+            if path.startswith("/api/"):
+                return self._json({"error": "Маршрут не найден"}, 404)
             return self._serve_static(path)
+        except AuthError as exc:
+            self._json({"error": str(exc)}, exc.status)
         except KeyError as exc:
             self._json({"error": str(exc)}, 404)
         except Exception as exc:  # keep demo responsive and return readable diagnostics
@@ -67,16 +154,46 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:  # noqa: N802
         try:
+            origin = self.headers.get("Origin")
+            if origin and origin not in {f"http://{self.headers.get('Host')}", f"https://{self.headers.get('Host')}"}:
+                raise AuthError("Запрос с другого сайта запрещён", 403)
             payload = self._body()
+            if self.path == "/api/login":
+                if AUTH is None:
+                    raise AuthError("Вход не настроен", 503)
+                username, password = payload.get("username", ""), payload.get("password", "")
+                if not isinstance(username, str) or not isinstance(password, str) or len(password) > 1024:
+                    raise ValueError("Некорректные данные входа")
+                token, session = AUTH.login(username, password, self.client_address[0])
+                AUTH.logout(self._token())
+                return self._json({"user": session["user"], "csrf": session["csrf"]}, cookie=self._cookie(token))
+            session = self._session()
+            if not secrets.compare_digest(self.headers.get("X-CSRF-Token", ""), session["csrf"]):
+                raise AuthError("Обновите страницу и повторите запрос", 403)
+            if self.path == "/api/logout":
+                AUTH.logout(self._token())
+                return self._json({"status": "ok"}, cookie=self._cookie("", 0))
+            if self.path in {"/api/coach", "/api/complete", "/api/participation"}:
+                self._role(session, "employee")
+                employee_id = self._employee_id(session, payload.get("employee_id"))
+            if self.path == "/api/participation":
+                return self._json(ENGINE.set_participation(employee_id, payload.get("paused")))
+            if self.path == "/api/coach":
+                return self._json(coaching(ENGINE.employee_view(employee_id), generate=True))
             if self.path == "/api/complete":
-                result = ENGINE.complete(str(payload["employee_id"]), str(payload["event_id"]))
+                result = ENGINE.complete(employee_id, str(payload["event_id"]))
+                result["coaching"] = coaching(result)
                 return self._json(result)
             if self.path == "/api/upload":
+                self._role(session, "hr")
                 return self._json(ENGINE.upload_bundle(payload))
             if self.path == "/api/reset":
+                self._role(session, "hr")
                 ENGINE.reset()
                 return self._json({"status": "ok", "data_source": ENGINE.data_source})
             self._json({"error": "Маршрут не найден"}, 404)
+        except AuthError as exc:
+            self._json({"error": str(exc)}, exc.status)
         except (KeyError, ValueError, json.JSONDecodeError) as exc:
             self._json({"error": str(exc)}, 400)
         except Exception as exc:
@@ -84,6 +201,8 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
 
     def _serve_static(self, path: str) -> None:
         relative = "index.html" if path in {"", "/"} else unquote(path.lstrip("/"))
+        if relative not in {"index.html", "app.js", "styles.css"}:
+            return self._json({"error": "Файл не найден"}, 404)
         file_path = (ROOT / relative).resolve()
         if ROOT not in file_path.parents and file_path != ROOT:
             return self._json({"error": "Недопустимый путь"}, 403)
@@ -110,7 +229,11 @@ def main() -> None:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=int(os.getenv("PORT", "8000")))
     args = parser.parse_args()
-    server = ThreadingHTTPServer((args.host, args.port), CareerQuestHandler)
+    try:
+        server = CareerQuestServer((args.host, args.port), CareerQuestHandler)
+    except OSError as exc:
+        parser.exit(1, f"Не удалось запустить сервер на {args.host}:{args.port}. Остановите предыдущий сервер или выберите другой --port. ({exc})\n")
+    configure_auth()
     print(f"Career Quest: http://{args.host}:{args.port}")
     try:
         server.serve_forever()

@@ -13,6 +13,7 @@ from collections import Counter, defaultdict
 from copy import deepcopy
 from dataclasses import dataclass
 from datetime import date, timedelta
+from threading import RLock
 from typing import Any
 
 
@@ -203,9 +204,11 @@ class ScoreParts:
 
 class CareerEngine:
     def __init__(self) -> None:
+        self.lock = RLock()
         self.reset()
 
     def reset(self) -> None:
+        self.paused_employees = set()
         self.skills = build_skills()
         self.events = build_events()
         self.employees = build_employees()
@@ -431,23 +434,81 @@ class CareerEngine:
             "history": history_rows,
             "decision_insight": insight,
             "data_source": self.data_source,
+            "gamification": self.gamification(employee_id),
+            "participation_paused": employee_id in self.paused_employees,
         }
 
+    def set_participation(self, employee_id: str, paused: bool) -> dict[str, Any]:
+        if not isinstance(paused, bool):
+            raise ValueError("paused должен быть boolean")
+        with self.lock:
+            self.employee(employee_id)
+            if paused:
+                self.paused_employees.add(employee_id)
+            else:
+                self.paused_employees.discard(employee_id)
+            return {"paused": paused}
+
+    def gamification(self, employee_id: str) -> dict[str, Any]:
+        # One-off activities earn XP once, including imported history.
+        completed = {}
+        for row in self.history:
+            if row.get("employee_id") == employee_id and row.get("status") == "completed" and row.get("event_id"):
+                event_id = row["event_id"]
+                if event_id not in completed or str(row.get("date", "")) < str(completed[event_id].get("date", "")):
+                    completed[event_id] = row
+        today = date.today()
+        monday = today - timedelta(days=today.weekday())
+        weekly = 0
+        for row in completed.values():
+            try:
+                finished = date.fromisoformat(str(row.get("date", "")))
+                weekly += monday <= finished <= today
+            except ValueError:
+                pass
+        count = len(completed)
+        xp = count * 100
+        badges = [
+            {"name": name, "description": description, "earned": count >= threshold}
+            for name, description, threshold in [
+                ("Первый шаг", "Завершить 1 активность", 1),
+                ("Исследователь", "Завершить 3 активности", 3),
+                ("Мастер практики", "Завершить 5 активностей", 5),
+            ]
+        ]
+        return {"xp": xp, "level": xp // 300 + 1, "level_xp": xp % 300,
+                "level_goal": 300, "completed": count, "weekly_completed": weekly,
+                "weekly_goal": 2, "badges": badges}
+
     def complete(self, employee_id: str, event_id: str) -> dict[str, Any]:
+        with self.lock:
+            return self._complete(employee_id, event_id)
+
+    def _complete(self, employee_id: str, event_id: str) -> dict[str, Any]:
         employee = self.employee(employee_id)
+        if employee_id in self.paused_employees:
+            raise ValueError("Участие на паузе. Возобновите его, когда будете готовы.")
         event = self.event(event_id)
         if not event:
             raise KeyError(f"Активность {event_id} не найдена")
-        for item in event.get("skills", []):
-            skill_id = item.get("skill_id")
+        if any(row.get("employee_id") == employee_id and row.get("event_id") == event_id
+               and row.get("status") == "completed" for row in self.history):
+            return {**self.employee_view(employee_id), "reward": {"xp": 0, "already_completed": True}}
+        roles = event.get("audience", {}).get("roles", []) if isinstance(event.get("audience"), dict) else []
+        if roles and employee.get("role") not in roles:
+            raise ValueError("Активность не подходит для этой роли")
+        changes = {}
+        for item in event.get("skills") or event.get("skill_gains") or []:
+            skill_id = item.get("skill_id") or item.get("skill")
             if not skill_id:
                 continue
-            before = int(employee.setdefault("skills", {}).get(skill_id, 0))
-            employee["skills"][skill_id] = min(before + int(item.get("gain", 1)), int(item.get("max_level", 5)))
+            before = int(employee.get("skills", {}).get(skill_id, 0))
+            changes[skill_id] = max(before, min(before + int(item.get("gain", 1)), int(item.get("max_level", 5))))
+        employee.setdefault("skills", {}).update(changes)
         self.history.append(
             {"employee_id": employee_id, "event_id": event_id, "status": "completed", "on_time": True, "date": str(date.today())}
         )
-        return self.employee_view(employee_id)
+        return {**self.employee_view(employee_id), "reward": {"xp": 100, "already_completed": False}}
 
     def hr_view(self) -> dict[str, Any]:
         gaps: Counter[str] = Counter()
@@ -468,7 +529,7 @@ class CareerEngine:
                 without_step += 1
             rows = [row for row in self.history if row.get("employee_id") == employee["employee_id"]]
             participation = sum(row.get("status") == "completed" for row in rows) / max(len(rows), 1) * 100
-            if readiness < 58 and participation < 55:
+            if readiness < 58 and participation < 55 and employee["employee_id"] not in self.paused_employees:
                 watchlist.append(
                     {
                         "employee_id": employee["employee_id"],
@@ -485,6 +546,7 @@ class CareerEngine:
         total_history = max(sum(participants.values()), 1)
         return {
             "employees": len(self.employees),
+            "paused_employees": len(self.paused_employees),
             "average_readiness": round(sum(readiness_values) / max(len(readiness_values), 1), 1),
             "without_step": without_step,
             "completion_rate": round(participants["completed"] / total_history * 100, 1),

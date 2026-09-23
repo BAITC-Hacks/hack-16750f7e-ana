@@ -8,7 +8,18 @@
     <link rel="stylesheet" href="styles.css" />
   </head>
   <body>
-    <div class="app-shell">
+    <main id="loginView" class="login-view">
+      <form id="loginForm" class="panel login-card">
+        <span class="brand-mark">CQ</span><p class="eyebrow">CAREER QUEST · ВНУТРЕННИЙ КОНТУР</p>
+        <h1>Ваш следующий шаг</h1><p>Сотрудник — личная траектория и развитие в своём темпе. HR — компетенции команды и поддержка участников.</p>
+        <label>Логин<input id="loginUsername" name="username" autocomplete="username" required maxlength="128" /></label>
+        <label>Пароль<input id="loginPassword" name="password" type="password" autocomplete="current-password" required maxlength="1024" /></label>
+        <button id="loginButton" class="primary-button" type="submit">Войти</button>
+        <p id="loginError" role="alert"></p>
+        <small>Роль определяется учётной записью. Данные входа выдаёт администратор; для локального демо они показаны в терминале сервера.</small>
+      </form>
+    </main>
+    <div class="app-shell" id="appShell" hidden>
       <aside class="sidebar" id="sidebar">
         <div class="brand">
           <span class="brand-mark">CQ</span>
@@ -36,6 +47,8 @@
           <button class="mobile-menu" id="mobileMenu" aria-label="Открыть меню">☰</button>
           <div><p class="eyebrow">HALYK BANK · HACKALEM AI</p><h1 id="pageTitle">Карьерная траектория</h1></div>
           <div class="topbar-actions">
+            <span id="sessionLabel" class="method-pill"></span>
+            <button class="ghost-button" id="logoutButton">Выйти</button>
             <label class="employee-picker" id="employeePickerWrap"><span>Профиль</span><select id="employeePicker" aria-label="Выбрать сотрудника"></select></label>
             <button class="ghost-button" id="resetButton" title="Вернуть демо-данные">↻ Сбросить</button>
           </div>
@@ -44,6 +57,10 @@
         <div class="loading-state" id="loadingState"><span class="loader"></span><p>AI анализирует профиль, историю и требования грейда…</p></div>
 
         <section id="employeeView" hidden>
+          <section class="panel participation-controls">
+            <div><strong>Развитие — ваш выбор</strong><p id="participationStatus">Можно заниматься в своём темпе или взять паузу без потери XP. Другие сотрудники не видят вашу вовлечённость.</p></div>
+            <button id="participationButton" class="ghost-button">Взять паузу</button>
+          </section>
           <section class="profile-hero">
             <div class="profile-copy">
               <div class="identity-row">
@@ -71,7 +88,21 @@
             <div><small>ПОЧЕМУ AI НЕ ВЫБРАЛ ПРОСТО САМЫЙ СЛАБЫЙ НАВЫК</small><p id="decisionInsightText"></p></div>
           </section>
 
+          <section class="section-block panel" aria-labelledby="questTitle">
+            <div class="section-heading"><div><p class="eyebrow">CAREER QUEST</p><h2 id="questTitle">Ваш прогресс</h2></div><span class="method-pill">+100 XP за активность</span></div>
+            <div id="questProgress" class="quest-progress"></div>
+            <div id="questBadges" class="quest-badges"></div>
+          </section>
+
+          <section class="section-block panel" aria-labelledby="coachTitle">
+            <div class="section-heading"><div><p class="eyebrow">ПРАКТИКА И ОБРАТНАЯ СВЯЗЬ</p><h2 id="coachTitle">Как улучшить навыки</h2></div><button id="coachButton" class="primary-button" type="button">Получить совет AI</button></div>
+            <p id="coachStatus" class="coach-status" role="status"></p>
+            <p id="coachAdvice" class="coach-advice" hidden></p>
+            <div id="coachPlans" class="recommendation-grid"></div>
+          </section>
+
           <section class="section-block recommendations-section">
+            <p>Активности добровольны. Пропуск недельной цели не отнимает XP.</p>
             <div class="section-heading">
               <div><p class="eyebrow">ОБЪЯСНИМЫЙ AI</p><h2>Следующие лучшие шаги</h2></div>
               <span class="method-pill">4 фактора · один прозрачный score</span>
@@ -108,6 +139,7 @@
             <section class="panel participation-panel"><div class="section-heading compact"><div><p class="eyebrow">АКТИВНОСТИ</p><h2>Участие сотрудников</h2></div></div><div class="participation-chart" id="participationChart"></div></section>
           </div>
           <section class="panel watchlist-panel">
+            <p class="coach-status">Сигнал для предложения помощи, а не оценка сотрудника: готовность ниже 58% и доля завершений ниже 55%. Добровольная пауза исключает сотрудника из этого списка.</p>
             <div class="section-heading compact"><div><p class="eyebrow">ТРЕБУЕТ ВНИМАНИЯ</p><h2>Кому нужен подходящий следующий шаг</h2></div><span class="privacy-chip">Не рейтинг · приватный список</span></div>
             <div class="watch-table" id="watchTable"></div>
           </section>
@@ -132,6 +164,7 @@
       <p class="eyebrow">ПРОЗРАЧНОЕ РЕШЕНИЕ</p><h2 id="explanationTitle">Почему этот шаг</h2>
       <div class="score-hero"><strong id="explanationScore">0</strong><span>/ 100<br />AI relevance score</span></div>
       <div class="factor-list" id="factorList"></div><div class="score-breakdown" id="scoreBreakdown"></div>
+      <p class="modal-intro">Score = 46% соответствия грейду + 26% влияния + 18% истории + 10% выполнимости. Готовность — среднее по требуемым навыкам: min(текущий уровень / требуемый, 1) × 100%. После выполнения применяются прирост и предел уровня активности, затем готовность пересчитывается. XP учитывается отдельно; готовность не гарантирует повышение.</p>
     </section>
 
     <div class="toast" id="toast" role="status"></div>

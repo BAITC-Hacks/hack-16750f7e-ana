@@ -1,4 +1,6 @@
 const state = {
+  user: null,
+  csrf: null,
   employees: [],
   employeeId: "E0028",
   view: "employee",
@@ -27,11 +29,17 @@ const els = {
 };
 
 async function api(path, options = {}) {
+  const requestUser = state.user;
   const response = await fetch(path, {
-    headers: { "Content-Type": "application/json", ...(options.headers || {}) },
     ...options,
+    headers: { "Content-Type": "application/json", "X-CSRF-Token": state.csrf || "", ...(options.headers || {}) },
   });
-  const data = await response.json().catch(() => ({}));
+  if (!response.headers.get("Content-Type")?.includes("application/json")) {
+    throw new Error("Сервер вернул страницу вместо API. Перезапустите server.py из папки career-quest и откройте http://127.0.0.1:8000.");
+  }
+  const data = await response.json();
+  if (requestUser !== state.user) throw new Error("Сессия изменилась. Повторите действие.");
+  if (response.status === 401 && path !== "/api/login") showLogin();
   if (!response.ok) throw new Error(data.error || `Ошибка ${response.status}`);
   return data;
 }
@@ -112,7 +120,71 @@ function renderEmployee(profile) {
   renderRecommendations(profile.recommendations);
   renderSkills(profile.skills);
   renderHistory(profile.history);
+  const paused = profile.participation_paused;
+  $("#participationButton").hidden = state.user?.role !== "employee";
+  $("#participationButton").textContent = paused ? "Возобновить участие" : "Взять паузу";
+  $("#participationStatus").textContent = paused
+    ? "Участие на паузе. XP и навыки сохранены. Возвращайтесь, когда будете готовы. HR видит факт паузы в общей статистике."
+    : "Можно заниматься в своём темпе или взять паузу без потери XP. Другие сотрудники не видят вашу вовлечённость.";
+  renderGamification(profile.gamification);
+  renderCoaching(profile.coaching);
 }
+
+function renderGamification(game) {
+  if (!game) {
+    $("#questProgress").innerHTML = `<p class="coach-status">Для отображения XP и уровней перезапустите сервер Career Quest и обновите страницу. Сервер пока использует предыдущую версию приложения.</p>`;
+    $("#questBadges").innerHTML = "";
+    return;
+  }
+  $("#questProgress").innerHTML = `
+    <div><strong>Уровень ${game.level}</strong><p>${game.xp} XP всего · ${game.completed} завершено</p>
+      <progress aria-label="XP до следующего уровня" value="${game.level_xp}" max="${game.level_goal}"></progress>
+      <small>${game.level_goal - game.level_xp} XP до уровня ${game.level + 1}</small></div>
+    <div><strong>Квест недели · по желанию</strong><p>Личная цель: ${game.weekly_goal} активности</p>
+      <progress aria-label="Квест недели" value="${Math.min(game.weekly_completed, game.weekly_goal)}" max="${game.weekly_goal}"></progress>
+      <small>${game.weekly_completed} / ${game.weekly_goal}${game.weekly_completed >= game.weekly_goal ? " · Цель достигнута!" : " · Новая неделя начинается в понедельник"}</small></div>`;
+  $("#questBadges").innerHTML = game.badges.map((badge) => `<div class="quest-badge ${badge.earned ? "earned" : ""}"><strong>${badge.earned ? "★" : "☆"} ${escapeHtml(badge.name)}</strong><small>${escapeHtml(badge.description)} · ${badge.earned ? "Получено" : "Пока закрыто"}</small></div>`).join("");
+}
+
+function renderCoaching(coach) {
+  if (!coach) {
+    $("#coachStatus").textContent = "Советы по навыкам появятся после перезапуска сервера и обновления страницы.";
+    $("#coachAdvice").textContent = "";
+    $("#coachAdvice").hidden = true;
+    $("#coachPlans").innerHTML = "";
+    $("#coachButton").disabled = true;
+    $("#coachButton").textContent = "Нужен перезапуск сервера";
+    return;
+  }
+  $("#coachStatus").textContent = coach.message;
+  $("#coachAdvice").textContent = coach.advice;
+  $("#coachAdvice").hidden = !coach.advice;
+  $("#coachButton").disabled = !coach.ai_available || state.user?.role !== "employee";
+  $("#coachButton").textContent = coach.ai_available ? "Получить совет AI" : "Локальный план";
+  $("#coachPlans").innerHTML = coach.plans.map((plan) => `<article class="coach-card">
+    <h3>${escapeHtml(plan.name)}</h3><p class="coach-status">${escapeHtml(plan.reason)}</p>
+    <p>${escapeHtml(plan.practice)}</p><p>${escapeHtml(plan.checkpoint)}</p>
+    <small>Следующий шаг: ${escapeHtml(plan.activity)}</small></article>`).join("");
+}
+
+$("#coachButton").addEventListener("click", async () => {
+  const profile = state.profile;
+  const button = $("#coachButton");
+  button.disabled = true;
+  $("#coachStatus").textContent = "AI составляет план…";
+  try {
+    const coach = await api("/api/coach", { method: "POST", body: JSON.stringify({ employee_id: profile.employee.employee_id }) });
+    if (state.profile === profile) {
+      profile.coaching = coach;
+      renderCoaching(coach);
+    }
+  } catch (error) {
+    if (state.profile === profile) {
+      $("#coachStatus").textContent = error.message;
+      button.disabled = false;
+    }
+  }
+});
 
 function renderRecommendations(recommendations) {
   const container = $("#recommendationGrid");
@@ -138,7 +210,12 @@ function renderRecommendations(recommendations) {
     .join("");
 
   $$('[data-details]').forEach((button) => button.addEventListener("click", () => openExplanation(recommendations[Number(button.dataset.details)])));
-  $$('[data-complete]').forEach((button) => button.addEventListener("click", () => completeActivity(button.dataset.complete, button)));
+  $$('[data-complete]').forEach((button) => {
+    button.hidden = state.user?.role !== "employee";
+    button.disabled = !!state.profile?.participation_paused;
+    if (button.disabled) button.textContent = "Участие на паузе";
+    button.addEventListener("click", () => completeActivity(button.dataset.complete, button));
+  });
 }
 
 function typeLabel(type) {
@@ -171,17 +248,22 @@ function renderHistory(history) {
 }
 
 async function completeActivity(eventId, button) {
+  const profile = state.profile;
   button.disabled = true;
   button.textContent = "Обновляю прогресс…";
   try {
     const updated = await api("/api/complete", { method: "POST", body: JSON.stringify({ employee_id: state.employeeId, event_id: eventId }) });
-    burstConfetti(button.getBoundingClientRect());
+    if (state.profile !== profile) return;
+    if (updated.reward?.xp) burstConfetti(button.getBoundingClientRect());
     state.profile = updated;
     renderEmployee(updated);
-    showToast("Активность учтена · траектория пересчитана");
+    showToast(updated.reward
+      ? (updated.reward.xp ? `+${updated.reward.xp} XP · Навыки и план обновлены!` : "Эта активность уже учтена")
+      : "Активность учтена · Для включения XP перезапустите сервер");
   } catch (error) {
     showToast(error.message, true);
     button.disabled = false;
+    button.textContent = "Отметить выполненным";
   }
 }
 
@@ -211,6 +293,7 @@ function renderHr(data) {
     [`${data.average_readiness}%`, "Средняя готовность", "К следующему грейду"],
     [`${data.completion_rate}%`, "Завершаемость", "По всем активностям"],
     [data.without_step, "Без следующего шага", "Нужно действие HR"],
+    [data.paused_employees || 0, "Добровольная пауза", "Без сигнала о выпадении"],
   ];
   $("#kpiGrid").innerHTML = cards.map(([value, label, note]) => `<article class="kpi-card"><small>${label}</small><strong>${value}</strong><span>${note}</span></article>`).join("");
   const maxGap = Math.max(...data.skill_gaps.map((item) => item.total_gap), 1);
@@ -230,7 +313,7 @@ async function showEmployeeView() {
 function setActiveNav() {
   $("#employeeNav").classList.toggle("active", state.view === "employee");
   $("#hrNav").classList.toggle("active", state.view === "hr");
-  els.pickerWrap.hidden = state.view === "hr";
+  els.pickerWrap.hidden = state.view === "hr" || state.user?.role !== "hr";
   els.pageTitle.textContent = state.view === "hr" ? "HR-аналитика" : "Карьерная траектория";
   $("#sidebar").classList.remove("open");
 }
@@ -303,7 +386,7 @@ async function uploadFiles() {
     closeModals();
     showToast(`Данные загружены: ${result.employees} профилей`);
     await loadEmployees(state.employeeId);
-    await showEmployeeView();
+    await showHr();
   } catch (error) {
     showToast(error.message, true);
   } finally {
@@ -334,9 +417,9 @@ function burstConfetti(rect) {
   }
 }
 
-$("#employeeNav").addEventListener("click", showEmployeeView);
-$("#hrNav").addEventListener("click", showHr);
-els.picker.addEventListener("change", (event) => loadEmployee(event.target.value));
+$("#employeeNav").addEventListener("click", () => showEmployeeView().catch(error => showToast(error.message, true)));
+$("#hrNav").addEventListener("click", () => showHr().catch(error => showToast(error.message, true)));
+els.picker.addEventListener("change", (event) => loadEmployee(event.target.value).catch(error => showToast(error.message, true)));
 $("#mobileMenu").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 $("#openUploadButton").addEventListener("click", () => openModal(els.uploadModal));
 els.modalBackdrop.addEventListener("click", closeModals);
@@ -347,19 +430,97 @@ $("#dropZone").addEventListener("dragover", (event) => { event.preventDefault();
 $("#dropZone").addEventListener("dragleave", (event) => event.currentTarget.classList.remove("dragging"));
 $("#dropZone").addEventListener("drop", (event) => { event.preventDefault(); event.currentTarget.classList.remove("dragging"); selectFiles(event.dataTransfer.files); });
 $("#resetButton").addEventListener("click", async () => {
+  try {
   await api("/api/reset", { method: "POST", body: "{}" });
   state.employeeId = "E0028";
   await loadEmployees();
-  await showEmployeeView();
+  await showHr();
   showToast("Демо-данные восстановлены");
+  } catch (error) { showToast(error.message, true); }
 });
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeModals(); });
 
+function showLogin() {
+  state.user = null;
+  state.csrf = null;
+  state.profile = null;
+  state.employees = [];
+  state.selectedFiles = [];
+  closeModals();
+  $("#appShell").hidden = true;
+  $("#loginView").hidden = false;
+  $("#loginPassword").value = "";
+  els.employeeView.hidden = true;
+  els.hrView.hidden = true;
+  els.picker.innerHTML = "";
+  els.fileInput.value = "";
+  els.selectedFiles.innerHTML = "";
+  ["#watchTable", "#kpiGrid", "#gapChart", "#participationChart", "#recommendationGrid", "#skillsList", "#historyList", "#questProgress", "#questBadges", "#coachPlans", "#factorList", "#scoreBreakdown"].forEach(selector => $(selector).innerHTML = "");
+  ["#employeeName", "#employeeRole", "#employeeTenure", "#employeeAvatar", "#coachAdvice", "#coachStatus", "#decisionInsightText", "#explanationTitle"].forEach(selector => $(selector).textContent = "");
+  els.toast.classList.remove("show");
+}
+
+async function enterSession(session) {
+  if (!session?.user || !["employee", "hr"].includes(session.user.role) || !session.csrf) {
+    throw new Error("Запущена версия сервера без поддержки входа. Перезапустите server.py из папки career-quest.");
+  }
+  state.user = session.user;
+  state.csrf = session.csrf;
+  const hr = session.user.role === "hr";
+  $("#hrNav").hidden = !hr;
+  $("#employeeNav").lastElementChild.textContent = hr ? "Профили сотрудников" : "Мой путь";
+  $("#openUploadButton").hidden = !hr;
+  $("#resetButton").hidden = !hr;
+  $("#sessionLabel").textContent = hr ? "HR" : "Сотрудник";
+  $("#loginView").hidden = true;
+  $("#appShell").hidden = false;
+  if (hr) {
+    await loadEmployees();
+    await showHr();
+  } else {
+    state.employeeId = session.user.employee_id;
+    await showEmployeeView();
+  }
+}
+
+$("#loginForm").addEventListener("submit", async (event) => {
+  event.preventDefault();
+  $("#loginButton").disabled = true;
+  $("#loginError").textContent = "";
+  try {
+    const session = await api("/api/login", { method: "POST", body: JSON.stringify({
+      username: $("#loginUsername").value.trim(), password: $("#loginPassword").value,
+    }) });
+    $("#loginPassword").value = "";
+    await enterSession(session);
+  } catch (error) {
+    showLogin();
+    $("#loginError").textContent = error.message;
+  } finally { $("#loginButton").disabled = false; }
+});
+
+$("#logoutButton").addEventListener("click", async () => {
+  try {
+    await api("/api/logout", { method: "POST", body: "{}" });
+    showLogin();
+  } catch (error) { showToast(error.message, true); }
+});
+
+$("#participationButton").addEventListener("click", async () => {
+  $("#participationButton").disabled = true;
+  try {
+    await api("/api/participation", { method: "POST", body: JSON.stringify({ paused: !state.profile.participation_paused }) });
+    await loadEmployee();
+  } catch (error) { showToast(error.message, true); }
+  finally { $("#participationButton").disabled = false; }
+});
+
 (async function init() {
   try {
-    await loadEmployees();
-    await loadEmployee(state.employeeId);
+    const session = await api("/api/session");
+    await enterSession(session);
   } catch (error) {
-    els.loading.innerHTML = `<strong>Не удалось подключиться к серверу</strong><p>${escapeHtml(error.message)}. Запустите приложение командой <code>python3 server.py</code>.</p>`;
+    showLogin();
+    $("#loginError").textContent = error.message === "Войдите в приложение" ? "" : `${error.message}. Если код обновлён, перезапустите сервер.`;
   }
 })();
