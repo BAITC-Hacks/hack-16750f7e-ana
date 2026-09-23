@@ -146,6 +146,15 @@ button, select { cursor: pointer; }
 .coach-advice { white-space: pre-wrap; overflow-wrap: anywhere; padding: 18px; background: var(--green-soft); border-radius: 12px; font-size: 13px; line-height: 1.7; }
 [hidden] { display: none !important; }
 .login-view { min-height: 100vh; display: grid; place-items: center; padding: 24px; }
+.planner-budget { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; font-size: 12px; }
+.planner-budget select { padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: white; }
+.planner-options { display: grid; gap: 10px; margin: 16px 0; }
+.planner-option { display: flex; align-items: flex-start; gap: 12px; padding: 14px; border: 1px solid var(--line); border-radius: 12px; cursor: pointer; }
+.planner-option:has(input:checked) { background: var(--green-soft); border-color: var(--green); }
+.planner-option input { accent-color: var(--green); }
+.planner-option strong { font-size: 13px; }
+.planner-option small { display: block; margin-top: 6px; color: var(--muted); line-height: 1.5; font-size: 12px; }
+.simulation-result:not(:empty) { padding: 18px; margin-top: 16px; border-radius: 12px; background: var(--green-soft); font-size: 13px; line-height: 1.7; }
 .login-card { width: min(100%, 440px); display: grid; gap: 16px; }
 .login-card h1, .login-card p { margin: 0; }
 .login-card p, .login-card small { line-height: 1.6; color: var(--muted); }

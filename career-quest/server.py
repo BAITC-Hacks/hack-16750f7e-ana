@@ -142,6 +142,10 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
             if path == "/api/hr":
                 self._role(session, "hr")
                 return self._json(ENGINE.hr_view())
+            if path == "/api/planner":
+                query = parse_qs(parsed.query)
+                employee_id = self._employee_id(session, query.get("id", [None])[0])
+                return self._json(ENGINE.planner(employee_id, query.get("hours", [8])[0]))
             if path.startswith("/api/"):
                 return self._json({"error": "Маршрут не найден"}, 404)
             return self._serve_static(path)
@@ -149,6 +153,8 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
             self._json({"error": str(exc)}, exc.status)
         except KeyError as exc:
             self._json({"error": str(exc)}, 404)
+        except ValueError as exc:
+            self._json({"error": str(exc)}, 400)
         except Exception as exc:  # keep demo responsive and return readable diagnostics
             self._json({"error": str(exc)}, 500)
 
@@ -173,6 +179,9 @@ class CareerQuestHandler(BaseHTTPRequestHandler):
             if self.path == "/api/logout":
                 AUTH.logout(self._token())
                 return self._json({"status": "ok"}, cookie=self._cookie("", 0))
+            if self.path == "/api/simulate":
+                employee_id = self._employee_id(session, payload.get("employee_id"))
+                return self._json(ENGINE.simulate(employee_id, payload.get("event_ids"), payload.get("hours", 8)))
             if self.path in {"/api/coach", "/api/complete", "/api/participation"}:
                 self._role(session, "employee")
                 employee_id = self._employee_id(session, payload.get("employee_id"))

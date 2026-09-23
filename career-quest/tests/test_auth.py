@@ -115,6 +115,20 @@ class AccessTest(unittest.TestCase):
             self.assertEqual(self.request(path)[0], 404)
         self.assertEqual(self.request("/app.js")[0], 200)
 
+    def test_planner_and_simulator_enforce_profile_access(self):
+        self.assertEqual(self.request("/api/planner?id=E0028")[0], 401)
+        headers = self.login()
+        self.assertEqual(self.request("/api/planner?hours=4", headers=headers)[0], 200)
+        self.assertEqual(self.request("/api/planner?hours=nan", headers=headers)[0], 400)
+        self.assertEqual(self.request("/api/planner?id=E0001", headers=headers)[0], 403)
+        payload = {"employee_id": "E0001", "event_ids": ["EV_SYSTEM_DESIGN"], "hours": 8}
+        self.assertEqual(self.request("/api/simulate", payload, headers)[0], 403)
+        payload["employee_id"] = "E0028"
+        before = server.ENGINE.employee_view("E0028")
+        self.assertEqual(self.request("/api/simulate", payload, headers)[0], 200)
+        self.assertEqual(before, server.ENGINE.employee_view("E0028"))
+        self.assertEqual(self.request("/api/simulate", payload, self.login("hr"))[0], 200)
+
     def test_pause_preserves_progress_and_suppresses_hr_signal(self):
         headers = self.login()
         employee = server.ENGINE.employee("E0028")

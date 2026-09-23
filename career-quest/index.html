@@ -110,6 +110,17 @@
             <div class="recommendation-grid" id="recommendationGrid"></div>
           </section>
 
+          <section class="section-block panel" aria-labelledby="plannerTitle">
+            <div class="section-heading"><div><p class="eyebrow">МОЙ ТЕМП · МОЙ ВЫБОР</p><h2 id="plannerTitle">Лаборатория развития: что если?</h2></div>
+              <label class="planner-budget">Мой бюджет времени <select id="plannerHours"><option value="2">2 часа</option><option value="5">5 часов</option><option value="8" selected>8 часов</option><option value="16">16 часов</option><option value="40">40 часов</option></select></label>
+            </div>
+            <p id="plannerMessage" class="coach-status" role="status"></p>
+            <p class="coach-status">Сравните прогноз для отдельных активностей. Выберите до трёх шагов в нужном порядке — ниже рассчитаем их общий эффект в пределах бюджета.</p>
+            <div id="plannerOptions" class="planner-options"></div>
+            <button id="simulateButton" class="primary-button" disabled>Рассчитать сценарий</button>
+            <div id="simulationResult" class="simulation-result" role="status" aria-live="polite"></div>
+          </section>
+
           <div class="two-column">
             <section class="panel skills-panel">
               <div class="section-heading compact">

@@ -1,6 +1,8 @@
 const state = {
   user: null,
   csrf: null,
+  plannerRequest: 0,
+  selectedSteps: [],
   employees: [],
   employeeId: "E0028",
   view: "employee",
@@ -128,7 +130,64 @@ function renderEmployee(profile) {
     : "Можно заниматься в своём темпе или взять паузу без потери XP. Другие сотрудники не видят вашу вовлечённость.";
   renderGamification(profile.gamification);
   renderCoaching(profile.coaching);
+  loadPlanner();
 }
+
+async function loadPlanner() {
+  const profile = state.profile;
+  const request = ++state.plannerRequest;
+  state.selectedSteps = [];
+  $("#simulateButton").disabled = true;
+  $("#plannerOptions").innerHTML = "";
+  $("#simulationResult").textContent = "";
+  $("#plannerMessage").textContent = "Подбираем варианты под ваш бюджет…";
+  try {
+    const plan = await api(`/api/planner?id=${encodeURIComponent(profile.employee.employee_id)}&hours=${encodeURIComponent($("#plannerHours").value)}`);
+    if (state.profile !== profile || request !== state.plannerRequest) return;
+    $("#plannerMessage").textContent = plan.message;
+    $("#plannerOptions").innerHTML = plan.options.map(item => `<label class="planner-option">
+      <input type="checkbox" data-plan-event="${escapeHtml(item.event_id)}" />
+      <span><strong>${escapeHtml(item.title)}</strong><small>${item.duration_hours} ч. · score ${item.score}/100 · готовность ${item.current_readiness}% → ${item.projected_readiness}% (+${item.readiness_delta} п.п.)</small></span>
+    </label>`).join("");
+    $$('[data-plan-event]').forEach(input => input.addEventListener("change", () => {
+      if (input.checked && state.selectedSteps.length >= 3) {
+        input.checked = false;
+        showToast("В одном сценарии можно сравнить до трёх шагов");
+        return;
+      }
+      state.selectedSteps = input.checked ? [...state.selectedSteps, input.dataset.planEvent]
+        : state.selectedSteps.filter(id => id !== input.dataset.planEvent);
+      $("#simulateButton").disabled = !state.selectedSteps.length;
+      $("#simulationResult").textContent = "";
+    }));
+  } catch (error) {
+    if (state.profile === profile && request === state.plannerRequest) $("#plannerMessage").textContent = error.message;
+  }
+}
+
+$("#plannerHours").addEventListener("change", loadPlanner);
+$("#simulateButton").addEventListener("click", async () => {
+  const profile = state.profile;
+  const request = state.plannerRequest;
+  const selection = state.selectedSteps.join("|");
+  $("#simulateButton").disabled = true;
+  $("#simulationResult").textContent = "Рассчитываем…";
+  try {
+    const result = await api("/api/simulate", { method: "POST", body: JSON.stringify({
+      employee_id: profile.employee.employee_id, event_ids: state.selectedSteps, hours: $("#plannerHours").value,
+    }) });
+    if (state.profile !== profile || request !== state.plannerRequest || selection !== state.selectedSteps.join("|")) return;
+    $("#simulationResult").innerHTML = `<h3>Готовность: ${result.before}% → ${result.after}%</h3>
+      <p>${result.hours} ч. · Полностью закрытых пробелов: ${result.closed_gaps}</p>
+      <ol>${result.steps.map(step => `<li>${escapeHtml(step.title)}: ${step.before}% → ${step.after}% (+${step.delta} п.п.)</li>`).join("")}</ol>
+      <p>${result.skills.map(skill => `${escapeHtml(skill.name)}: ${skill.before} → ${skill.after}`).join(" · ")}</p>
+      <small>${escapeHtml(result.note)}</small>`;
+  } catch (error) {
+    if (state.profile === profile && request === state.plannerRequest && selection === state.selectedSteps.join("|")) $("#simulationResult").textContent = error.message;
+  } finally {
+    if (state.profile === profile && request === state.plannerRequest) $("#simulateButton").disabled = !state.selectedSteps.length;
+  }
+});
 
 function renderGamification(game) {
   if (!game) {
@@ -189,7 +248,10 @@ $("#coachButton").addEventListener("click", async () => {
 function renderRecommendations(recommendations) {
   const container = $("#recommendationGrid");
   if (!recommendations.length) {
-    container.innerHTML = `<div class="panel"><strong>Маршрут завершён</strong><p>Текущие навыки уже соответствуют следующему грейду. HR может добавить новую цель.</p></div>`;
+    const hasGaps = state.profile?.skills.some(skill => skill.gap > 0);
+    container.innerHTML = hasGaps
+      ? `<div class="panel"><strong>Нужен новый шаг</strong><p>Пробелы ещё есть, но подходящих незавершённых активностей в каталоге нет. Обсудите практику с наставником или попросите HR дополнить каталог.</p></div>`
+      : `<div class="panel"><strong>Маршрут завершён</strong><p>По текущим требованиям пробелов нет. Обсудите следующую цель с наставником.</p></div>`;
     return;
   }
   container.innerHTML = recommendations
@@ -444,6 +506,12 @@ function showLogin() {
   state.user = null;
   state.csrf = null;
   state.profile = null;
+  state.plannerRequest += 1;
+  state.selectedSteps = [];
+  $("#plannerOptions").innerHTML = "";
+  $("#simulationResult").textContent = "";
+  $("#plannerMessage").textContent = "";
+  $("#plannerHours").value = "8";
   state.employees = [];
   state.selectedFiles = [];
   closeModals();

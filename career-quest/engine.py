@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import csv
 import io
+import math
 import random
 from collections import Counter, defaultdict
 from copy import deepcopy
@@ -438,6 +439,78 @@ class CareerEngine:
             "participation_paused": employee_id in self.paused_employees,
         }
 
+    @staticmethod
+    def time_budget(value: Any) -> float:
+        if isinstance(value, bool):
+            raise ValueError("Бюджет времени должен быть от 1 до 40 часов")
+        try:
+            hours = float(value)
+        except (TypeError, ValueError):
+            raise ValueError("Бюджет времени должен быть от 1 до 40 часов") from None
+        if not math.isfinite(hours) or not 1 <= hours <= 40:
+            raise ValueError("Бюджет времени должен быть от 1 до 40 часов")
+        return hours
+
+    def planner(self, employee_id: str, hours: Any = 8) -> dict[str, Any]:
+        hours = self.time_budget(hours)
+        ranked = self.recommendations(employee_id, limit=len(self.events))
+        options = [item for item in ranked if 0 < item["duration_hours"] <= hours]
+        top = ranked[0] if ranked else None
+        if not ranked:
+            message = "В каталоге нет подходящих незавершённых активностей. Проверьте пробелы с наставником: отсутствие шага не означает готовность к повышению."
+        elif not options:
+            message = f"В {hours:g} ч. не помещается ни одна активность каталога. Можно выбрать короткое упражнение наставника или увеличить бюджет — участие добровольно."
+        elif top["event_id"] != options[0]["event_id"]:
+            message = f"Лучший шаг без ограничения — «{top['title']}» ({top['duration_hours']:g} ч.). В ваш бюджет помещается «{options[0]['title']}»: приоритет пересчитан среди доступных по времени вариантов."
+        else:
+            message = "Первый вариант имеет наибольший score среди шагов, которые помещаются в ваш бюджет. Сравните время и прогнозируемый прирост перед выбором."
+        return {"hours": hours, "options": options, "message": message}
+
+    @staticmethod
+    def apply_gains(levels: dict[str, int], event: dict[str, Any]) -> dict[str, int]:
+        updated = dict(levels)
+        for item in event.get("skills") or event.get("skill_gains") or []:
+            skill_id = item.get("skill_id") or item.get("skill")
+            if skill_id:
+                before = int(levels.get(skill_id, 0))
+                updated[skill_id] = max(before, min(before + int(item.get("gain", 1)), int(item.get("max_level", 5))))
+        return updated
+
+    def simulate(self, employee_id: str, event_ids: Any, hours: Any = 8) -> dict[str, Any]:
+        """Counterfactual projection only: never writes skills, history or XP."""
+        budget = self.time_budget(hours)
+        if (not isinstance(event_ids, list) or not 1 <= len(event_ids) <= 3
+                or any(not isinstance(item, str) for item in event_ids)
+                or len(set(event_ids)) != len(event_ids)):
+            raise ValueError("Выберите от 1 до 3 разных активностей")
+        with self.lock:
+            options = {item["event_id"]: item for item in self.planner(employee_id, budget)["options"]}
+            if any(event_id not in options for event_id in event_ids):
+                raise ValueError("Один из шагов больше недоступен. Обновите варианты.")
+            total_hours = sum(options[event_id]["duration_hours"] for event_id in event_ids)
+            if total_hours > budget:
+                raise ValueError(f"Выбранные шаги требуют {total_hours:g} ч., бюджет — {budget:g} ч.")
+            employee = self.employee(employee_id)
+            requirements = self.requirements(employee, next_grade(employee.get("grade", "Middle")))
+            original = dict(employee.get("skills", {}))
+            levels = dict(original)
+            before = self.readiness(levels, requirements)
+            steps = []
+            for event_id in event_ids:
+                previous = self.readiness(levels, requirements)
+                levels = self.apply_gains(levels, self.event(event_id))
+                current = self.readiness(levels, requirements)
+                steps.append({"title": options[event_id]["title"], "before": previous,
+                              "after": current, "delta": round(current - previous, 1)})
+            return {"before": before, "after": self.readiness(levels, requirements),
+                    "hours": total_hours, "steps": steps,
+                    "closed_gaps": sum(original.get(skill, 0) < required <= levels.get(skill, 0)
+                                       for skill, required in requirements.items()),
+                    "skills": [{"name": local_text((self.skill(skill) or {}).get("name")) or skill,
+                                "before": original.get(skill, 0), "after": value}
+                               for skill, value in levels.items() if value != original.get(skill, 0)],
+                    "note": "Это сценарий по правилам каталога, а не оценка реального обучения. Навыки, история и XP не изменены. Порядок шагов — порядок выбора; эффект пересчитан после каждого шага."}
+
     def set_participation(self, employee_id: str, paused: bool) -> dict[str, Any]:
         if not isinstance(paused, bool):
             raise ValueError("paused должен быть boolean")
@@ -497,14 +570,7 @@ class CareerEngine:
         roles = event.get("audience", {}).get("roles", []) if isinstance(event.get("audience"), dict) else []
         if roles and employee.get("role") not in roles:
             raise ValueError("Активность не подходит для этой роли")
-        changes = {}
-        for item in event.get("skills") or event.get("skill_gains") or []:
-            skill_id = item.get("skill_id") or item.get("skill")
-            if not skill_id:
-                continue
-            before = int(employee.get("skills", {}).get(skill_id, 0))
-            changes[skill_id] = max(before, min(before + int(item.get("gain", 1)), int(item.get("max_level", 5))))
-        employee.setdefault("skills", {}).update(changes)
+        employee["skills"] = self.apply_gains(employee.get("skills", {}), event)
         self.history.append(
             {"employee_id": employee_id, "event_id": event_id, "status": "completed", "on_time": True, "date": str(date.today())}
         )
