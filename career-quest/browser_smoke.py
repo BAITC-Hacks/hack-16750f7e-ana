@@ -34,6 +34,7 @@ class CDP:
         if not response.startswith(b"HTTP/1.1 101 "):
             raise RuntimeError("Chromium websocket handshake failed")
         self.sequence = 0
+        self.events = []
 
     def read(self, count):
         data = b""
@@ -64,6 +65,8 @@ class CDP:
             if first & 15 == 8:
                 raise RuntimeError("Chromium websocket closed")
             result = json.loads(payload)
+            if "method" in result:
+                self.events.append(result)
             if result.get("id") == self.sequence:
                 if "error" in result:
                     raise RuntimeError(str(result["error"]))
@@ -109,6 +112,9 @@ def main():
             tab = next(item for item in json.load(response) if item["type"] == "page")
         browser = CDP(tab["webSocketDebuggerUrl"])
         browser.call("Page.enable")
+        browser.call("Network.enable")
+        browser.call("Log.enable")
+        browser.call("Runtime.enable")
         browser.call("Page.addScriptToEvaluateOnNewDocument", source="window.uiErrors=[]; addEventListener('error', e=>uiErrors.push(e.message)); addEventListener('unhandledrejection', e=>uiErrors.push(String(e.reason)));")
         for width, height in [(1440, 900), (1366, 768), (390, 844)]:
             server.ENGINE.reset()
@@ -118,7 +124,7 @@ def main():
             browser.until("document.querySelector('#loginButton') && !document.querySelector('#loginView').hidden")
 
             def capture(name):
-                assert browser.js("document.documentElement.scrollWidth <= innerWidth"), "page overflow"
+                assert browser.js("document.documentElement.scrollWidth <= document.documentElement.clientWidth"), f"page overflow: {width}, {name}"
                 data = browser.call("Page.captureScreenshot", format="png")["data"]
                 (artifacts / f"{width}-{name}.png").write_bytes(base64.b64decode(data))
 
@@ -130,6 +136,17 @@ def main():
             browser.until("document.querySelectorAll('[data-details]').length > 0 && !document.querySelector('#employeeView').hidden")
             browser.until("document.querySelectorAll('[data-plan-event]').length > 0")
             capture("profile")
+            assert browser.js("new Set([...document.querySelectorAll('[id]')].map(e=>e.id)).size === document.querySelectorAll('[id]').length"), "duplicate IDs"
+            browser.js("window.completeRequests=0; window.nativeFetch=fetch; window.fetch=(url, options)=>{if(String(url).includes('/api/complete')) completeRequests++; return nativeFetch(url,options)}")
+            browser.js("document.querySelectorAll('[data-route]')[1]?.click()")
+            assert browser.js("document.querySelector('#routeProjection').textContent === state.profile.recommendations.find(r=>r.event_id===state.routeEvent).projected_readiness+'%'"), "route forecast"
+            browser.js("document.querySelector('[data-route]').click()")
+            if width == 390:
+                browser.js("document.querySelector('#mobileMenu').click()")
+                browser.until("Math.abs(document.querySelector('#sidebar').getBoundingClientRect().left) < 0.1")
+                capture("menu")
+                browser.call("Input.dispatchKeyEvent", type="keyDown", key="Escape", code="Escape", windowsVirtualKeyCode=27)
+                assert browser.js("document.querySelector('#menuBackdrop').hidden && document.activeElement.id==='mobileMenu'"), "menu close and focus"
             browser.js("document.querySelector('[data-details]').focus(); document.querySelector('[data-details]').click()")
             browser.until("document.querySelector('#explanationModal').classList.contains('open')")
             assert browser.js("document.querySelector('#explanationModal').contains(document.activeElement)"), "modal focus"
@@ -145,6 +162,7 @@ def main():
             capture("simulation")
             browser.js("document.querySelector('[data-complete]').click()")
             browser.until(f"state.profile.readiness > {before}")
+            assert browser.js("completeRequests === 1"), "single completion request"
             browser.js("document.querySelector('#logoutButton').click()")
             browser.until("!document.querySelector('#loginView').hidden")
             login("hr")
@@ -162,6 +180,7 @@ def main():
             capture("import")
             browser.js("document.querySelector('#uploadButton').click()")
             browser.until("document.querySelector('#uploadModal').hidden && !document.querySelector('#hrView').hidden")
+            browser.until("document.querySelector('#toast').textContent === 'Импорт применён атомарно'")
             browser.js("state.view='employee'; loadEmployee('JURY01')")
             browser.until("state.profile?.employee.employee_id === 'JURY01'")
             assert browser.js("!window.importExecuted && document.querySelector('#employeeName').textContent.includes('<img')"), "imported HTML must stay text"
@@ -179,6 +198,10 @@ def main():
             browser.js("releaseAi({recommendations:[{event_id:'STALE'}], revision:oldProfile.revision, ai_used:true, decision_source:'hybrid_ai'}); api=oldApi")
             browser.until("state.profile.recommendations.length === 0 && !state.profile.ai_used")
             assert browser.js("uiErrors.length === 0"), browser.js("uiErrors")
+            failed_resources = [event for event in browser.events if event.get("method") == "Network.responseReceived" and event["params"]["type"] in ("Script", "Stylesheet", "Image", "Font") and event["params"]["response"]["status"] >= 400]
+            assert not failed_resources, failed_resources
+            console_errors = [event for event in browser.events if event.get("method") == "Runtime.consoleAPICalled" and event["params"]["type"] == "error"]
+            assert not console_errors, console_errors
             report.append({"viewport": f"{width}x{height}", "flow": "PASS", "horizontal_overflow": False, "console_errors": 0})
         (artifacts / "report.json").write_text(json.dumps(report, indent=2), encoding="utf-8")
         print(json.dumps(report))
