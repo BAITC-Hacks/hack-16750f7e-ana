@@ -158,9 +158,12 @@ def normalize_bundle(bundle):
             row["on_time"] = value
             if row.get("date"):
                 try:
-                    row["date"] = date.fromisoformat(text(row["date"], path + ".date")).isoformat()
+                    parsed = date.fromisoformat(text(row["date"], path + ".date"))
                 except ValueError:
                     fail(path + ".date", "ожидается дата YYYY-MM-DD")
+                if parsed > date.today():
+                    fail(path + ".date", "будущая дата не может влиять на текущую рекомендацию")
+                row["date"] = parsed.isoformat()
             else:
                 row["date"] = ""
             rows.append(row)

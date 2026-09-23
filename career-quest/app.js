@@ -128,7 +128,7 @@ function renderEmployee(profile) {
   $("#targetGrade").textContent = profile.target_grade;
   $("#skillsTargetGrade").textContent = profile.target_grade;
   const readiness = profile.readiness ?? 0;
-  $("#readinessValue").textContent = profile.requirements_missing ? "—" : `${readiness}%`;
+  $("#readinessValue").textContent = profile.requirements_missing ? "—" : `${Math.round(readiness)}%`;
   $("#readinessRing").style.background = `conic-gradient(var(--lime) 0deg, var(--lime) ${readiness * 3.6}deg, rgba(255,255,255,.12) ${readiness * 3.6}deg)`;
   $("#trajectoryLine").style.width = `${readiness}%`;
   $("#readinessLabel").textContent = profile.requirements_missing ? "Нет требований для расчёта" : openGaps
@@ -142,7 +142,7 @@ function renderEmployee(profile) {
 
   renderRecommendations(profile.recommendations);
   renderSkills(profile.skills);
-  renderHistory(profile.history);
+  renderHistory(profile.history, profile.history_total);
   const paused = profile.participation_paused;
   $("#participationButton").hidden = state.user?.role !== "employee";
   $("#participationButton").textContent = paused ? "Возобновить участие" : "Взять паузу";
@@ -161,6 +161,7 @@ function renderDecision(profile) {
   $("#decisionSource").textContent = hybrid ? "HYBRID AI · ПРОВЕРЕНО АЛГОРИТМОМ" : (["not_requested", "ai_disabled", "no_candidates", undefined, null].includes(profile.fallback_reason) ? "АЛГОРИТМИЧЕСКИЙ РЕЖИМ" : "РЕЗЕРВНЫЙ АЛГОРИТМИЧЕСКИЙ РЕЖИМ");
   const messages = {ai_disabled: "Внешний AI отключён.", no_candidates: "Нет допустимых кандидатов.",
     timeout: "AI не ответил вовремя.", network_error: "AI недоступен.", invalid_response: "Ответ AI не прошёл проверку.",
+    quality_guard: "Выбор AI слишком ухудшал проверенный локальный результат и был отклонён.",
     state_changed: "Профиль изменился во время запроса.", ai_busy: "AI занят.", request_in_progress: "AI уже обрабатывает этот профиль."};
   $("#decisionStatus").textContent = hybrid
     ? `LLM выбрал порядок допустимых шагов; факты и score рассчитаны локально. ${profile.cache_hit ? "Ответ из кеша." : `Время AI: ${profile.ai_latency_ms} мс.`}`
@@ -321,15 +322,6 @@ $("#coachButton").addEventListener("click", async () => {
 
 function renderRecommendations(recommendations) {
   const container = $("#recommendationGrid");
-  const selected = recommendations.find(item => item.event_id === state.routeEvent) || recommendations[0];
-  state.routeEvent = selected?.event_id;
-  $("#routeProjection").textContent = selected?.projected_readiness == null ? "—" : `${selected.projected_readiness}%`;
-  $("#routeOptions").innerHTML = recommendations.length ? recommendations.map((item, index) => `<button data-route="${index}" aria-pressed="${item === selected}"><b>${String(index + 1).padStart(2, "0")}</b><span>${escapeHtml(item.title)}</span><strong>${Math.round(item.score)}<small> / 100</small></strong></button>`).join("") : '<p>Нет доступных шагов</p>';
-  $$("[data-route]").forEach(button => button.addEventListener("click", () => {
-    state.routeEvent = recommendations[Number(button.dataset.route)].event_id;
-    renderRecommendations(recommendations);
-    $$("[data-route]")[Number(button.dataset.route)]?.focus();
-  }));
   if (!recommendations.length) {
     if (state.profile?.requirements_missing) {
       container.innerHTML = `<div class="panel"><strong>Нет требований для расчёта</strong><p>HR нужно добавить требования следующего грейда для этой роли.</p></div>`;
@@ -343,14 +335,12 @@ function renderRecommendations(recommendations) {
   }
   container.innerHTML = recommendations
     .map((item, index) => {
-      if (item !== selected) return "";
       const skills = item.affected_skills.map((skill) => `${escapeHtml(skill.name)} ${skill.before}→${skill.after}`).join(" · ");
       return `
         <article class="recommendation-card ${index === 0 ? "primary" : ""}">
           <div class="rank-row"><span class="rank">${index === 0 ? "Следующий лучший шаг" : `Альтернатива ${index}`}</span><span class="score"><b>${Math.round(item.score)}</b> / 100</span></div>
           <h3>${escapeHtml(item.title)}</h3><p class="card-reason">${escapeHtml(item.factors[0]?.text || "Шаг закрывает текущий разрыв.")}</p><small>${state.profile?.ai_used ? "Hybrid AI" : "Алгоритмический подбор"}</small>
           <div class="recommendation-meta"><span>${escapeHtml(typeLabel(item.type))}</span><span>≈ ${item.duration_hours} ч.</span><span>${skills}</span></div>
-          <div class="route-factors">${Object.entries(item.score_breakdown).map(([key, value]) => `<div><small>${({grade_relevance:"Грейд и gap",trajectory_impact:"Влияние",history_fit:"История",feasibility:"Выполнимость"})[key] || escapeHtml(key)}</small><b>${value}%</b></div>`).join("")}</div>
           <div class="impact-box"><span>Покрытие требований</span><strong>${item.current_readiness}% → ${item.projected_readiness}% · +${item.readiness_delta} п.п.</strong></div>
           <div class="card-actions">
             <button data-details="${index}">Почему этот шаг</button>
@@ -395,8 +385,10 @@ function renderSkills(skills) {
     .join("");
 }
 
-function renderHistory(history) {
-  $("#historyCount").textContent = `${history.length} ${plural(history.length, "событие", "события", "событий")}`;
+function renderHistory(history, total = history.length) {
+  $("#historyCount").textContent = total > history.length
+    ? `Последние ${history.length} из ${total}`
+    : `${total} ${plural(total, "событие", "события", "событий")}`;
   $("#historyList").innerHTML = history.length
     ? history.map((item) => {
         const completed = item.status === "completed";
@@ -465,6 +457,8 @@ async function showHr() {
 function renderHr(data) {
   const cards = [
     [data.employees, "Сотрудников в выборке", "Покрытие профилей"],
+    [`${data.dataset_stats.events} / ${data.dataset_stats.skills} / ${data.dataset_stats.history_months}`,
+      "Масштаб набора", "активности / навыки / месяцев"],
     [data.average_readiness == null ? "—" : `${data.average_readiness}%`, "Среднее покрытие", "Только профили с требованиями"],
     [`${data.completion_rate}%`, "Завершаемость", "Завершённые / все записи истории"],
     [data.without_step, "Без следующего шага", "Нужно действие HR"],
@@ -472,8 +466,8 @@ function renderHr(data) {
     [data.requirements_missing || 0, "Нет требований", "Качество данных: готовность недоступна"],
   ];
   $("#kpiGrid").innerHTML = cards.map(([value, label, note]) => `<article class="kpi-card"><small>${label}</small><strong>${value}</strong><span>${note}</span></article>`).join("");
-  const maxGap = Math.max(...data.skill_gaps.map((item) => item.total_gap), 1);
-  $("#gapChart").innerHTML = data.skill_gaps.map((item) => `<div class="bar-row"><label>${escapeHtml(item.name)}</label><div class="bar-track"><i style="width:${item.total_gap / maxGap * 100}%"></i></div><b>${item.total_gap}</b></div>`).join("");
+  const maxGap = Math.max(...data.skill_gaps.map((item) => item.employees_with_gap), 1);
+  $("#gapChart").innerHTML = data.skill_gaps.map((item) => `<div class="bar-row"><label>${escapeHtml(item.name)}</label><div class="bar-track"><i style="width:${item.employees_with_gap / maxGap * 100}%"></i></div><b>${item.employees_with_gap} чел.</b></div>`).join("");
   const statusLabels = { completed: "Завершено", skipped: "Пропущено", declined: "Отказ" };
   const colors = { completed: "#168457", skipped: "#ef9854", declined: "#d9675d" };
   $("#participationChart").innerHTML = data.participation.map((item) => `<div class="participation-row"><i style="background:${colors[item.status] || "#87918b"}"></i><span>${statusLabels[item.status] || item.status}</span><strong>${item.percent}%</strong></div>`).join("");
@@ -494,7 +488,7 @@ function setActiveNav() {
   $("#hrNav").classList.toggle("active", state.view === "hr");
   els.pickerWrap.hidden = state.view === "hr" || state.user?.role !== "hr";
   els.pageTitle.textContent = state.view === "hr" ? "HR-аналитика" : "Карьерная траектория";
-  setMenu(false);
+  $("#sidebar").classList.remove("open");
 }
 
 let modalTrigger = null;
@@ -590,20 +584,7 @@ function burstConfetti(rect) {
 $("#employeeNav").addEventListener("click", () => showEmployeeView().catch(error => showToast(error.message, true)));
 $("#hrNav").addEventListener("click", () => showHr().catch(error => showToast(error.message, true)));
 els.picker.addEventListener("change", (event) => loadEmployee(event.target.value).catch(error => showToast(error.message, true)));
-function setMenu(open) {
-  $("#sidebar").classList.toggle("open", open);
-  $("#menuBackdrop").hidden = !open;
-  $("#mobileMenu").setAttribute("aria-expanded", String(open));
-  $(".main-content").inert = open;
-  if (open) $("#closeMenu").focus();
-}
-$("#mobileMenu").addEventListener("click", () => setMenu(!$("#sidebar").classList.contains("open")));
-$("#closeMenu").addEventListener("click", () => { setMenu(false); $("#mobileMenu").focus(); });
-$("#menuBackdrop").addEventListener("click", () => { setMenu(false); $("#mobileMenu").focus(); });
-matchMedia("(min-width: 901px)").addEventListener("change", event => { if (event.matches) setMenu(false); });
-document.addEventListener("keydown", event => {
-  if (event.key === "Escape" && $("#sidebar").classList.contains("open")) { setMenu(false); $("#mobileMenu").focus(); }
-});
+$("#mobileMenu").addEventListener("click", () => $("#sidebar").classList.toggle("open"));
 $("#openUploadButton").addEventListener("click", () => openModal(els.uploadModal));
 els.modalBackdrop.addEventListener("click", closeModals);
 $$('[data-close-modal]').forEach((button) => button.addEventListener("click", closeModals));
@@ -624,10 +605,6 @@ $("#resetButton").addEventListener("click", async () => {
 document.addEventListener("keydown", (event) => { if (event.key === "Escape") closeModals(); });
 
 function showLogin() {
-  setMenu(false);
-  state.routeEvent = null;
-  $("#routeOptions").textContent = "";
-  $("#routeProjection").textContent = "—";
   clearTimeout(state.expiryTimer);
   state.aiRequest += 1;
   state.profileRequest += 1;

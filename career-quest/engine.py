@@ -49,6 +49,54 @@ SKILL_DEFINITIONS = [
     ("SK_LEADERSHIP", "Лидерство", "soft"),
     ("SK_COMMUNICATION", "Коммуникация", "soft"),
     ("SK_RISK", "Управление рисками", "hard"),
+    ("SK_API_DESIGN", "Проектирование API", "hard"),
+    ("SK_DATABASES", "Проектирование баз данных", "hard"),
+    ("SK_CLOUD", "Облачная архитектура", "hard"),
+    ("SK_SECURE_CODING", "Безопасная разработка", "hard"),
+    ("SK_TEST_AUTOMATION", "Автоматизация тестирования", "hard"),
+    ("SK_CICD", "CI/CD", "hard"),
+    ("SK_OBSERVABILITY", "Наблюдаемость систем", "hard"),
+    ("SK_PERFORMANCE", "Производительность", "hard"),
+    ("SK_DISTRIBUTED_SYSTEMS", "Распределённые системы", "hard"),
+    ("SK_CODE_REVIEW", "Код-ревью", "soft"),
+    ("SK_INCIDENT_RESPONSE", "Реагирование на инциденты", "hard"),
+    ("SK_BANKING_ARCHITECTURE", "Банковская архитектура", "hard"),
+    ("SK_STATISTICS", "Статистика", "hard"),
+    ("SK_ANALYTICS_PYTHON", "Python для аналитики", "hard"),
+    ("SK_EXPERIMENT_DESIGN", "Дизайн экспериментов", "hard"),
+    ("SK_DATA_QUALITY", "Качество данных", "hard"),
+    ("SK_DATA_MODELING", "Моделирование данных", "hard"),
+    ("SK_BI_TOOLS", "BI-инструменты", "hard"),
+    ("SK_FORECASTING", "Прогнозирование", "hard"),
+    ("SK_RISK_ANALYTICS", "Риск-аналитика", "hard"),
+    ("SK_DATA_GOVERNANCE", "Управление данными", "hard"),
+    ("SK_ETL", "ETL-процессы", "hard"),
+    ("SK_METRIC_DESIGN", "Дизайн метрик", "hard"),
+    ("SK_CAUSAL_INFERENCE", "Причинно-следственный анализ", "hard"),
+    ("SK_DISCOVERY", "Product discovery", "hard"),
+    ("SK_PRIORITIZATION", "Приоритизация", "hard"),
+    ("SK_PRODUCT_METRICS", "Продуктовые метрики", "hard"),
+    ("SK_ROADMAP", "Управление roadmap", "hard"),
+    ("SK_BUSINESS_CASE", "Бизнес-кейс", "hard"),
+    ("SK_FINANCIAL_MODELING", "Финансовое моделирование", "hard"),
+    ("SK_COMPLIANCE", "Комплаенс", "hard"),
+    ("SK_EXPERIMENTATION", "Продуктовые эксперименты", "hard"),
+    ("SK_FACILITATION", "Фасилитация", "soft"),
+    ("SK_MARKET_ANALYSIS", "Анализ рынка", "hard"),
+    ("SK_SERVICE_DESIGN", "Сервис-дизайн", "hard"),
+    ("SK_PRODUCT_LEADERSHIP", "Продуктовое лидерство", "soft"),
+    ("SK_CUSTOMER_EMPATHY", "Клиентская эмпатия", "soft"),
+    ("SK_COMPLAINT_HANDLING", "Работа с жалобами", "soft"),
+    ("SK_SERVICE_STANDARDS", "Стандарты сервиса", "hard"),
+    ("SK_PRODUCT_KNOWLEDGE", "Знание банковских продуктов", "hard"),
+    ("SK_DIGITAL_SUPPORT", "Цифровая поддержка", "hard"),
+    ("SK_ETHICAL_SALES", "Этичные продажи", "soft"),
+    ("SK_FRAUD_SIGNALS", "Выявление признаков мошенничества", "hard"),
+    ("SK_DEESCALATION", "Деэскалация", "soft"),
+    ("SK_BILINGUAL_SERVICE", "Двуязычный сервис", "soft"),
+    ("SK_QUALITY_CONTROL", "Контроль качества", "hard"),
+    ("SK_TEAM_COORDINATION", "Координация команды", "soft"),
+    ("SK_COACHING", "Наставничество", "soft"),
 ]
 
 
@@ -58,6 +106,57 @@ ROLE_SKILLS = {
     "Product Manager": ["SK_PRODUCT_STRATEGY", "SK_CUSTOMER_RESEARCH", "SK_STAKEHOLDER", "SK_PUBLIC_SPEAKING"],
     "Contact Center Specialist": ["SK_COMMUNICATION", "SK_STAKEHOLDER", "SK_RISK", "SK_LEADERSHIP"],
 }
+
+
+# The full catalogue mirrors the 60-skill challenge volume. Four skills per
+# role are promotion-critical for Junior/Middle paths; adjacent capabilities
+# become explicit requirements on the Lead path instead of diluting the next
+# grade score with dozens of unrelated fields.
+ROLE_EXTENDED_SKILLS = {
+    "Backend Engineer": ["SK_API_DESIGN", "SK_DATABASES", "SK_CLOUD", "SK_SECURE_CODING",
+        "SK_TEST_AUTOMATION", "SK_CICD", "SK_OBSERVABILITY", "SK_PERFORMANCE",
+        "SK_DISTRIBUTED_SYSTEMS", "SK_CODE_REVIEW", "SK_INCIDENT_RESPONSE", "SK_BANKING_ARCHITECTURE"],
+    "Data Analyst": ["SK_STATISTICS", "SK_ANALYTICS_PYTHON", "SK_EXPERIMENT_DESIGN", "SK_DATA_QUALITY",
+        "SK_DATA_MODELING", "SK_BI_TOOLS", "SK_FORECASTING", "SK_RISK_ANALYTICS",
+        "SK_DATA_GOVERNANCE", "SK_ETL", "SK_METRIC_DESIGN", "SK_CAUSAL_INFERENCE"],
+    "Product Manager": ["SK_DISCOVERY", "SK_PRIORITIZATION", "SK_PRODUCT_METRICS", "SK_ROADMAP",
+        "SK_BUSINESS_CASE", "SK_FINANCIAL_MODELING", "SK_COMPLIANCE", "SK_EXPERIMENTATION",
+        "SK_FACILITATION", "SK_MARKET_ANALYSIS", "SK_SERVICE_DESIGN", "SK_PRODUCT_LEADERSHIP"],
+    "Contact Center Specialist": ["SK_CUSTOMER_EMPATHY", "SK_COMPLAINT_HANDLING", "SK_SERVICE_STANDARDS",
+        "SK_PRODUCT_KNOWLEDGE", "SK_DIGITAL_SUPPORT", "SK_ETHICAL_SALES", "SK_FRAUD_SIGNALS",
+        "SK_DEESCALATION", "SK_BILINGUAL_SERVICE", "SK_QUALITY_CONTROL", "SK_TEAM_COORDINATION", "SK_COACHING"],
+}
+
+DEMO_REFERENCE_DATE = date(2026, 9, 23)
+
+
+def history_is_effective(row: dict[str, Any], as_of: date | None = None) -> bool:
+    """Ignore impossible future evidence even if a caller bypassed import checks."""
+    value = str(row.get("date", "")).strip()
+    if not value:
+        return True
+    try:
+        return date.fromisoformat(value) <= (as_of or date.today())
+    except ValueError:
+        return False
+
+
+def history_recency(row: dict[str, Any], as_of: date | None = None) -> float:
+    """Old misses fade; an undated legacy record receives neutral half weight."""
+    value = str(row.get("date", "")).strip()
+    if not value:
+        return 0.5
+    try:
+        age = ((as_of or date.today()) - date.fromisoformat(value)).days
+    except ValueError:
+        return 0.0
+    if age < 0:
+        return 0.0
+    if age <= 180:
+        return 1.0
+    if age <= 365:
+        return 0.5
+    return 0.2
 
 
 ROLE_LABELS = {
@@ -81,10 +180,13 @@ def build_skills() -> list[dict[str, Any]]:
                     "Senior": 3 if position > 1 else 4,
                     "Lead": 4 if position > 1 else 5,
                 }
-                # The verification profile from the brief already meets the
-                # Senior Python bar; System Design is the critical gap.
+                # Role policy: practical Python is already expected at Middle;
+                # architecture becomes the sharper differentiator for Senior.
                 if role == "Backend Engineer" and skill_id == "SK_PYTHON":
                     requirements[role] = {"Junior": 2, "Middle": 3, "Senior": 3, "Lead": 4}
+        for role, extended in ROLE_EXTENDED_SKILLS.items():
+            if skill_id in extended:
+                requirements[role] = {"Lead": 4}
         skills.append({"skill_id": skill_id, "name": {"ru": name, "en": name}, "type": kind, "requirements": requirements})
     return skills
 
@@ -103,6 +205,34 @@ def build_events() -> list[dict[str, Any]]:
         ("EV_STAKEHOLDER", "Переговоры со стейкхолдерами", "workshop", ["Product Manager", "Contact Center Specialist"], [("SK_STAKEHOLDER", 1, 5)], 4),
         ("EV_TEAM_LEAD", "Теневая смена руководителя", "rotation", ["Contact Center Specialist"], [("SK_LEADERSHIP", 1, 4), ("SK_RISK", 1, 4)], 8),
         ("EV_FEEDBACK", "Практика развивающей обратной связи", "mentoring", [], [("SK_COMMUNICATION", 1, 5), ("SK_LEADERSHIP", 1, 4)], 3),
+        ("EV_API_REVIEW", "API review: контракт без сюрпризов", "workshop", ["Backend Engineer"], [("SK_PYTHON", 1, 5), ("SK_API_DESIGN", 1, 4)], 4),
+        ("EV_DATABASE_LAB", "Лаборатория надёжных данных", "project", ["Backend Engineer"], [("SK_PYTHON", 1, 5), ("SK_DATABASES", 1, 4)], 6),
+        ("EV_CLOUD_GAME_DAY", "Cloud GameDay", "workshop", ["Backend Engineer"], [("SK_COMMUNICATION", 1, 5), ("SK_CLOUD", 1, 4)], 5),
+        ("EV_SECURE_CODE", "Secure coding challenge", "assessment", ["Backend Engineer"], [("SK_PYTHON", 1, 5), ("SK_SECURE_CODING", 1, 4)], 4),
+        ("EV_TEST_AUTOMATION", "Автотесты критичного сервиса", "project", ["Backend Engineer"], [("SK_PYTHON", 1, 5), ("SK_TEST_AUTOMATION", 1, 4)], 7),
+        ("EV_OBSERVABILITY_DRILL", "Диагностика production-сигналов", "workshop", ["Backend Engineer"], [("SK_COMMUNICATION", 1, 5), ("SK_OBSERVABILITY", 1, 4)], 3),
+        ("EV_INCIDENT_SIM", "Симуляция банковского инцидента", "assessment", ["Backend Engineer"], [("SK_COMMUNICATION", 1, 5), ("SK_INCIDENT_RESPONSE", 1, 4)], 5),
+        ("EV_STATS_LAB", "Статистика для продуктового решения", "workshop", ["Data Analyst"], [("SK_SQL", 1, 5), ("SK_STATISTICS", 1, 4)], 5),
+        ("EV_ANALYTICS_PYTHON", "Python-пайплайн аналитика", "project", ["Data Analyst"], [("SK_SQL", 1, 5), ("SK_ANALYTICS_PYTHON", 1, 4)], 7),
+        ("EV_EXPERIMENT_DESIGN", "Дизайн A/B-эксперимента", "assessment", ["Data Analyst"], [("SK_DATA_STORY", 1, 5), ("SK_EXPERIMENT_DESIGN", 1, 4)], 5),
+        ("EV_DATA_QUALITY", "Разбор инцидента качества данных", "workshop", ["Data Analyst"], [("SK_SQL", 1, 5), ("SK_DATA_QUALITY", 1, 4)], 4),
+        ("EV_DATA_MODEL", "Модель данных витрины", "project", ["Data Analyst"], [("SK_DATA_VIS", 1, 5), ("SK_DATA_MODELING", 1, 4)], 8),
+        ("EV_FORECAST", "Прогноз клиентского спроса", "project", ["Data Analyst"], [("SK_DATA_STORY", 1, 5), ("SK_FORECASTING", 1, 4)], 6),
+        ("EV_METRIC_REVIEW", "Защита дерева метрик", "mentoring", ["Data Analyst"], [("SK_DATA_VIS", 1, 5), ("SK_METRIC_DESIGN", 1, 4)], 3),
+        ("EV_DISCOVERY_SPRINT", "Discovery: проблема до решения", "project", ["Product Manager"], [("SK_CUSTOMER_RESEARCH", 1, 5), ("SK_DISCOVERY", 1, 4)], 6),
+        ("EV_PRIORITY_GAME", "Симуляция продуктовых приоритетов", "workshop", ["Product Manager"], [("SK_PRODUCT_STRATEGY", 1, 5), ("SK_PRIORITIZATION", 1, 4)], 4),
+        ("EV_PRODUCT_METRICS", "North Star Metric lab", "workshop", ["Product Manager"], [("SK_PRODUCT_STRATEGY", 1, 5), ("SK_PRODUCT_METRICS", 1, 4)], 4),
+        ("EV_ROADMAP_DEFENSE", "Защита roadmap перед комитетом", "assessment", ["Product Manager"], [("SK_PUBLIC_SPEAKING", 1, 5), ("SK_ROADMAP", 1, 4)], 5),
+        ("EV_BUSINESS_CASE", "Бизнес-кейс нового сервиса", "project", ["Product Manager"], [("SK_PRODUCT_STRATEGY", 1, 5), ("SK_BUSINESS_CASE", 1, 4)], 7),
+        ("EV_COMPLIANCE_CLINIC", "Product × Compliance clinic", "mentoring", ["Product Manager"], [("SK_STAKEHOLDER", 1, 5), ("SK_COMPLIANCE", 1, 4)], 3),
+        ("EV_SERVICE_BLUEPRINT", "Service blueprint клиента", "workshop", ["Product Manager"], [("SK_CUSTOMER_RESEARCH", 1, 5), ("SK_SERVICE_DESIGN", 1, 4)], 5),
+        ("EV_EMPATHY_LAB", "Лаборатория клиентской эмпатии", "workshop", ["Contact Center Specialist"], [("SK_COMMUNICATION", 1, 5), ("SK_CUSTOMER_EMPATHY", 1, 4)], 4),
+        ("EV_COMPLAINT_CASE", "Разбор сложной жалобы", "assessment", ["Contact Center Specialist"], [("SK_STAKEHOLDER", 1, 5), ("SK_COMPLAINT_HANDLING", 1, 4)], 4),
+        ("EV_SERVICE_STANDARD", "Стандарты сервиса на практике", "course", ["Contact Center Specialist"], [("SK_COMMUNICATION", 1, 5), ("SK_SERVICE_STANDARDS", 1, 4)], 3),
+        ("EV_PRODUCT_CLINIC", "Клиника банковских продуктов", "workshop", ["Contact Center Specialist"], [("SK_RISK", 1, 5), ("SK_PRODUCT_KNOWLEDGE", 1, 4)], 5),
+        ("EV_FRAUD_SIM", "Симуляция сигналов мошенничества", "assessment", ["Contact Center Specialist"], [("SK_RISK", 1, 5), ("SK_FRAUD_SIGNALS", 1, 4)], 5),
+        ("EV_DEESCALATION", "Деэскалация трудного диалога", "mentoring", ["Contact Center Specialist"], [("SK_COMMUNICATION", 1, 5), ("SK_DEESCALATION", 1, 4)], 3),
+        ("EV_QUALITY_CALIBRATION", "Калибровка качества звонков", "workshop", ["Contact Center Specialist"], [("SK_LEADERSHIP", 1, 5), ("SK_QUALITY_CONTROL", 1, 4)], 4),
     ]
     return [
         {
@@ -127,7 +257,7 @@ def build_employees(count: int = 200) -> list[dict[str, Any]]:
     for index in range(1, count + 1):
         role = roles[(index - 1) % len(roles)]
         grade = "Middle" if index % 4 else "Junior"
-        role_skills = ROLE_SKILLS[role]
+        role_skills = ROLE_SKILLS[role] + ROLE_EXTENDED_SKILLS[role]
         levels = {skill_id: rng.randint(1, 3 if grade == "Middle" else 2) for skill_id in role_skills}
         employees.append(
             {
@@ -154,19 +284,23 @@ def build_employees(count: int = 200) -> list[dict[str, Any]]:
 def build_history(employees: list[dict[str, Any]], events: list[dict[str, Any]]) -> list[dict[str, Any]]:
     rng = random.Random(73)
     history: list[dict[str, Any]] = []
-    today = date.today()
+    today = DEMO_REFERENCE_DATE
     for employee in employees:
         suitable = [e for e in events if not e["audience"]["roles"] or employee["role"] in e["audience"]["roles"]]
-        for offset in range(rng.randint(4, 9)):
+        # Eight to twelve meaningful records over the full 24-month window;
+        # sparse history is closer to voluntary learning than artificial daily logs.
+        records = rng.randint(8, 12)
+        for offset in range(records):
             event = suitable[(offset + int(employee["employee_id"][1:])) % len(suitable)]
             status = rng.choices(["completed", "skipped", "declined"], weights=[7, 2, 1])[0]
+            days_ago = round(730 * (records - 1 - offset) / max(records - 1, 1))
             history.append(
                 {
                     "employee_id": employee["employee_id"],
                     "event_id": event["event_id"],
                     "status": status,
                     "on_time": status == "completed" and rng.random() > 0.18,
-                    "date": str(today - timedelta(days=30 * (offset + 1))),
+                    "date": str(today - timedelta(days=days_ago)),
                 }
             )
 
@@ -295,18 +429,30 @@ class CareerEngine:
         covered = sum(min(float(levels.get(skill_id, 0)) / max(required, 1), 1.0) for skill_id, required in requirements.items())
         return round(covered / len(requirements) * 100, 1)
 
-    def _history_stats(self, employee_id: str, event: dict[str, Any]) -> dict[str, Any]:
-        rows = [row for row in self.history if row.get("employee_id") == employee_id]
-        same_event = [row for row in rows if row.get("event_id") == event.get("event_id")]
-        type_ids = {item["event_id"] for item in self.events if item.get("type") == event.get("type")}
-        same_type = [row for row in rows if row.get("event_id") in type_ids]
-        completed = sum(row.get("status") == "completed" for row in same_type)
-        on_time = sum(row.get("status") == "completed" and bool(row.get("on_time", True)) for row in same_type)
-        misses = sum(row.get("status") in {"skipped", "declined", "missed"} for row in same_event)
-        denominator = max(len(same_type), 1)
+    def _history_stats(self, employee_id: str, event: dict[str, Any], rows=None) -> dict[str, Any]:
+        rows = rows if rows is not None else [
+            row for row in self.history
+            if row.get("employee_id") == employee_id and history_is_effective(row)
+        ]
+        candidate_skills = {item.get("skill_id") or item.get("skill") for item in event.get("skills") or event.get("skill_gains") or []}
+        related_ids = {
+            item["event_id"] for item in self.events
+            if item.get("type") == event.get("type") or candidate_skills.intersection(
+                gain.get("skill_id") or gain.get("skill") for gain in item.get("skills") or item.get("skill_gains") or []
+            )
+        }
+        related = [row for row in rows if row.get("event_id") in related_ids]
+        completed = sum(row.get("status") == "completed" for row in related)
+        on_time = sum(row.get("status") == "completed" and bool(row.get("on_time", True)) for row in related)
+        missed_rows = [row for row in related if row.get("status") in {"skipped", "missed"}]
+        miss_weight = sum(history_recency(row) for row in missed_rows)
+        misses = len(missed_rows)
+        denominator = max(len(related), 1)
         completion_rate = completed / denominator
         on_time_rate = on_time / max(completed, 1)
-        fit = 0.45 + 0.35 * completion_rate + 0.20 * on_time_rate - 0.18 * misses
+        # A voluntary decline is not a negative signal. Skips affect format fit,
+        # not capability, are capped, and decay with time.
+        fit = 0.45 + 0.35 * completion_rate + 0.20 * on_time_rate - 0.10 * min(miss_weight, 2.5)
         return {
             "completed": completed,
             "on_time": on_time,
@@ -324,17 +470,14 @@ class CareerEngine:
         current_levels = {key: int(value) for key, value in employee.get("skills", {}).items()}
         current_readiness = self.readiness(current_levels, requirements)
         gaps = {skill_id: max(required - current_levels.get(skill_id, 0), 0) for skill_id, required in requirements.items()}
+        history_rows = [row for row in self.history if row.get("employee_id") == employee_id and history_is_effective(row)]
+        completed_ids = {row.get("event_id") for row in history_rows if row.get("status") == "completed"}
         ranked: list[dict[str, Any]] = []
 
         for event in self.events:
             # Completed one-off activities stay in history and are not offered
             # again. This makes the route visibly advance after completion.
-            already_completed = any(
-                row.get("employee_id") == employee_id
-                and row.get("event_id") == event.get("event_id")
-                and row.get("status") == "completed"
-                for row in self.history
-            )
+            already_completed = event.get("event_id") in completed_ids
             if already_completed:
                 continue
             roles = event.get("audience", {}).get("roles", []) if isinstance(event.get("audience"), dict) else []
@@ -363,7 +506,11 @@ class CareerEngine:
                 # Large, grade-critical gaps must outrank a cosmetically low
                 # skill that is easier to close. Coverage is useful, but it
                 # must not collapse the recommendation to "pick the minimum".
-                relevance_values.append(0.55 * severity + 0.30 * importance + 0.15 * coverage)
+                # Required level is the explicit catalogue signal of how
+                # critical a capability is for the target grade. It therefore
+                # outweighs the tempting but brittle "pick the lowest skill"
+                # heuristic represented by relative gap severity.
+                relevance_values.append(0.35 * severity + 0.50 * importance + 0.15 * coverage)
                 simulated[skill_id] = after
                 skill_info = self.skill(skill_id) or {"name": skill_id}
                 affected.append(
@@ -381,7 +528,7 @@ class CareerEngine:
 
             projected = self.readiness(simulated, requirements)
             delta = round(projected - current_readiness, 1)
-            history = self._history_stats(employee_id, event)
+            history = self._history_stats(employee_id, event, history_rows)
             grade_relevance = min(sum(relevance_values) / max(len(requirements), 1) * 3.2, 1.0)
             impact = min(delta / 14.0, 1.0)
             duration = float(event.get("duration_hours", 4))
@@ -392,7 +539,7 @@ class CareerEngine:
             if history["completed"]:
                 history_fact = f"Ранее завершено похожих активностей: {history['completed']}, вовремя: {history['on_time']}."
             elif history["misses"]:
-                history_fact = f"Похожие активности пропускались {history['misses']} раз, поэтому рекомендация понижена в рейтинге."
+                history_fact = f"Похожие по формату или навыкам активности пропускались {history['misses']} раз; свежие пропуски умеренно снижают приоритет, старые со временем теряют вес."
             else:
                 history_fact = "В истории нет повторных отказов от такого формата."
 
@@ -434,7 +581,7 @@ class CareerEngine:
                 }
             )
 
-        ranked.sort(key=lambda item: item["score"], reverse=True)
+        ranked.sort(key=lambda item: (-item["score"], -item["readiness_delta"], item["duration_hours"], item["event_id"]))
         return ranked[:limit]
 
     @synchronized
@@ -468,8 +615,10 @@ class CareerEngine:
                 f"Для перехода на {target} сильнее влияет «{recommendations[0]['affected_skills'][0]['name']}», "
                 "а история участия дополнительно меняет приоритет."
             )
+        all_history = [r for r in self.history if r.get("employee_id") == employee_id and history_is_effective(r)]
+        all_history.sort(key=lambda row: str(row.get("date", "")))
         history_rows = []
-        for row in reversed([r for r in self.history if r.get("employee_id") == employee_id][-8:]):
+        for row in reversed(all_history[-8:]):
             event = self.event(str(row.get("event_id"))) or {}
             history_rows.append({**row, "title": local_text(event.get("title") or row.get("event_id"))})
         return {
@@ -486,6 +635,7 @@ class CareerEngine:
             "skills": skill_rows,
             "recommendations": recommendations,
             "history": history_rows,
+            "history_total": len(all_history),
             "decision_insight": insight,
             "data_source": self.data_source,
             "gamification": self.gamification(employee_id),
@@ -585,6 +735,8 @@ class CareerEngine:
         # One-off activities earn XP once, including imported history.
         completed = {}
         for row in self.history:
+            if not history_is_effective(row):
+                continue
             if row.get("employee_id") == employee_id and row.get("status") == "completed" and row.get("event_id"):
                 event_id = row["event_id"]
                 if event_id not in completed or str(row.get("date", "")) < str(completed[event_id].get("date", "")):
@@ -625,7 +777,7 @@ class CareerEngine:
         if not event:
             raise KeyError(f"Активность {event_id} не найдена")
         if any(row.get("employee_id") == employee_id and row.get("event_id") == event_id
-               and row.get("status") == "completed" for row in self.history):
+               and row.get("status") == "completed" and history_is_effective(row) for row in self.history):
             return {**self.employee_view(employee_id), "reward": {"xp": 0, "already_completed": True}}
         roles = event.get("audience", {}).get("roles", []) if isinstance(event.get("audience"), dict) else []
         if roles and employee.get("role") not in roles:
@@ -656,7 +808,7 @@ class CareerEngine:
         if not helpful:
             return "Нет активности с доступным приростом для требуемых навыков"
         completed = {row.get("event_id") for row in self.history if row.get("employee_id") == employee["employee_id"]
-                     and row.get("status") == "completed"}
+                     and row.get("status") == "completed" and history_is_effective(row)}
         if all(event["event_id"] in completed for event in helpful):
             return "Все подходящие активности уже завершены"
         return "Нет допустимого следующего шага по текущим ограничениям"
@@ -665,6 +817,8 @@ class CareerEngine:
         known = {employee["employee_id"] for employee in self.employees}
         grouped = defaultdict(dict)
         for index, row in enumerate(self.history):
+            if not history_is_effective(row):
+                continue
             person = row.get("employee_id")
             if person not in known:
                 continue
@@ -691,13 +845,19 @@ class CareerEngine:
     @synchronized
     def hr_view(self) -> dict[str, Any]:
         gaps: Counter[str] = Counter()
-        participants = Counter(row.get("status", "unknown") for row in self.history)
+        gap_people: Counter[str] = Counter()
+        current_history = [row for row in self.history if history_is_effective(row)]
+        participants = Counter(row.get("status", "unknown") for row in current_history)
         watchlist = []
         without_step = 0
         employees_without_step = []
         requirements_missing = 0
         readiness_values = []
+        role_totals: Counter[str] = Counter()
+        role_with_step: Counter[str] = Counter()
         for employee in self.employees:
+            role = str(employee.get("role", "Unknown"))
+            role_totals[role] += 1
             target = next_grade(str(employee.get("grade", "Middle")))
             requirements = self.requirements(employee, target)
             levels = employee.get("skills", {})
@@ -707,15 +867,19 @@ class CareerEngine:
             else:
                 readiness_values.append(readiness)
             for skill_id, required in requirements.items():
-                gaps[skill_id] += max(int(required) - int(levels.get(skill_id, 0)), 0)
+                gap = max(int(required) - int(levels.get(skill_id, 0)), 0)
+                gaps[skill_id] += gap
+                gap_people[skill_id] += int(gap > 0)
             recommendations = self.recommendations(employee["employee_id"])
+            if recommendations:
+                role_with_step[role] += 1
             if not recommendations:
                 without_step += 1
                 employees_without_step.append({"employee_id": employee["employee_id"],
                     "name": employee.get("name", employee["employee_id"]),
                     "role": ROLE_LABELS.get(employee.get("role"), employee.get("role")),
                     "grade": employee.get("grade"), "readiness": readiness, "reason": self.no_step_reason(employee)})
-            rows = [row for row in self.history if row.get("employee_id") == employee["employee_id"]]
+            rows = [row for row in current_history if row.get("employee_id") == employee["employee_id"]]
             participation = sum(row.get("status") == "completed" for row in rows) / max(len(rows), 1) * 100
             if readiness is not None and readiness < 58 and participation < 55 and employee["employee_id"] not in self.paused_employees:
                 watchlist.append(
@@ -728,10 +892,14 @@ class CareerEngine:
                     }
                 )
         gap_rows = []
-        for skill_id, total_gap in gaps.most_common(7):
+        for skill_id, people in gap_people.most_common(7):
             skill = self.skill(skill_id) or {"name": skill_id}
-            gap_rows.append({"skill_id": skill_id, "name": local_text(skill.get("name")), "total_gap": total_gap})
+            gap_rows.append({"skill_id": skill_id, "name": local_text(skill.get("name")),
+                             "employees_with_gap": people, "share_with_gap": round(people / max(len(self.employees), 1) * 100, 1),
+                             "total_gap": gaps[skill_id]})
         total_history = max(sum(participants.values()), 1)
+        dated = sorted(date.fromisoformat(str(row["date"])) for row in current_history if row.get("date"))
+        history_months = round((dated[-1] - dated[0]).days / (365.25 / 12)) if len(dated) > 1 else 0
         return {
             "employees": len(self.employees),
             "paused_employees": len(self.paused_employees),
@@ -744,6 +912,12 @@ class CareerEngine:
             "skill_gaps": gap_rows,
             "participation": [{"status": key, "count": value, "percent": round(value / total_history * 100, 1)} for key, value in participants.items()],
             "watchlist": sorted(watchlist, key=lambda row: row["readiness"])[:8],
+            "dataset_stats": {"employees": len(self.employees), "events": len(self.events), "skills": len(self.skills),
+                              "history_records": len(current_history), "history_months": history_months},
+            "coverage_by_role": [{"role": ROLE_LABELS.get(role, role), "employees": count,
+                                  "with_step": role_with_step[role],
+                                  "coverage": round(role_with_step[role] / count * 100, 1)}
+                                 for role, count in sorted(role_totals.items())],
             "data_source": self.data_source,
         }
 
